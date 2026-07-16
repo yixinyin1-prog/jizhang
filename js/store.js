@@ -374,9 +374,12 @@ const Store = (() => {
     // 期初积蓄 = 各账户期初余额之和（迁移后账户是唯一来源）
     const openBase = accounts.reduce((s, a) => s + (a.opening || 0), 0);
     const savings = r2(openBase + t.income - t.expense);
+    // 负的负债（还款比借入多，多为早期花呗还款没记借入）不应抬高净资产，夹到 0
+    const debtForNet = Math.max(b.debt, 0);
+    const creditForNet = Math.max(b.credit, 0);
     return {
       savings, debt: b.debt, credit: b.credit,
-      net: r2(savings + b.credit - b.debt),
+      net: r2(savings + creditForNet - debtForNet),
     };
   }
 

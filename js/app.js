@@ -23,13 +23,14 @@ function weekRange(dstr) {  // 周一 ~ 周日
   return [start, dateAdd(start, 6)];
 }
 function weekdayCN(dstr) { return '日一二三四五六'[new Date(dstr + 'T00:00:00').getDay()]; }
-/* 负债余额的显示：负数意味着记录到的还款多于借入（多见于早期数据没记借入），
-   直接显示负数没人看得懂，换成「净还款」并提示去填期初负债 */
+/* 负债的显示：负数意味着记录到的还款比借入多（多见于早期没记「借」），
+   这不代表有钱，所以按 0 显示，别抬高净资产；把原委放进提示里。 */
 function debtLabel(v) {
   if (v > 0) return { text: fmtM(v), color: 'var(--danger)', tip: '' };
-  if (v === 0) return { text: '0.00', color: 'var(--text-3)', tip: '' };
-  return { text: '净还 ' + fmtM(-v), color: 'var(--brand)', tip: '记录到的还款比借入多，可在「账户」页填写期初负债' };
+  return { text: '0.00', color: 'var(--text-3)', tip: v < 0 ? `记录里还款比借入多 ${fmtM(-v)}（多为早期花呗还款没记「借」）。若开始记账前确实有欠款，在账户页填「期初负债」即可。` : '' };
 }
+/* 净还金额（还款超出借入的部分），0 表示没有 */
+function netRepaid(v) { return v < 0 ? -v : 0; }
 /* 收入分类关键词作为解析提示（排除与支出分类重复的词，避免误判） */
 function incomeHints() {
   const expKws = new Set(Store.getCategories('expense').flatMap(c => c.keywords || []));
@@ -307,16 +308,18 @@ function viewAccounts() {
   const as = Store.assetsAsOf('9999-12-31');
   const snap = Store.accountsSnapshot();
   const dl = debtLabel(as.debt);
+  const overpaid = netRepaid(as.debt);
   return `
   <div class="hero">
-    <div class="h-label">净资产</div>
+    <div class="h-label">净资产 = 账户总余额 ＋ 别人欠我 − 我欠别人</div>
     <div class="h-big">¥ ${fmtM(as.net)}</div>
     <div class="h-row">
       <div class="h-item"><div class="h-label">账户总余额</div><div class="h-val">${fmtM(snap.total)}</div></div>
       <div class="h-item"><div class="h-label">我欠别人</div><div class="h-val">${dl.text}</div></div>
-      <div class="h-item"><div class="h-label">别人欠我</div><div class="h-val">${fmtM(as.credit)}</div></div>
+      <div class="h-item"><div class="h-label">别人欠我</div><div class="h-val">${fmtM(Math.max(as.credit, 0))}</div></div>
     </div>
   </div>
+  ${overpaid > 0 ? `<div class="remind-bar" style="margin-bottom:14px"><span class="rb-ico">ℹ️</span><span class="rb-t">你的账里<b>还款比借入多了 ¥${fmtM(overpaid)}</b>（多半是早期用花呗付款时没记「借」，只记了「还」）。这不影响账户余额和收支统计。<br>如果开始记账前确实欠着这笔钱，往下拉在<b>「期初负债」</b>填 ${fmtM(overpaid)} 就对上了；如果没欠，忽略即可。</span></div>` : ''}
 
   <div class="card">
     <h3>💼 我的账户
@@ -353,9 +356,9 @@ function viewAccounts() {
       <input type="number" id="opCredit" value="${Store.getSettings().openingCredit || 0}" step="0.01" style="flex:0 0 130px">
     </div>
     <div class="debt-strip" style="margin-top:12px">
-      <div class="debt-box good"><div class="d-label">积蓄</div><div class="d-val">${fmtM(as.savings)}</div></div>
+      <div class="debt-box good"><div class="d-label">积蓄（账户总额）</div><div class="d-val">${fmtM(as.savings)}</div></div>
       <div class="debt-box ${as.debt > 0 ? 'bad' : ''}" title="${dl.tip}"><div class="d-label">负债</div><div class="d-val" style="color:${dl.color}">${dl.text}</div></div>
-      <div class="debt-box ${as.credit > 0 ? 'warn' : ''}"><div class="d-label">债权</div><div class="d-val">${fmtM(as.credit)}</div></div>
+      <div class="debt-box ${as.credit > 0 ? 'warn' : ''}"><div class="d-label">债权</div><div class="d-val">${fmtM(Math.max(as.credit, 0))}</div></div>
       <div class="debt-box ${as.net >= 0 ? 'good' : 'bad'}"><div class="d-label">净资产</div><div class="d-val" style="color:${as.net >= 0 ? 'var(--brand)' : 'var(--danger)'}">${fmtM(as.net)}</div></div>
     </div>
   </div>`;
