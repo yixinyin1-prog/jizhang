@@ -2463,6 +2463,16 @@ function importHistory(obj) {
 }
 
 /* ---------- 启动 ---------- */
+/* 判断是不是装成 APP 在跑：是的话给 body 打标记，让顶栏让开状态栏/刘海 */
+(function detectShell() {
+  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+    || (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches)
+    || navigator.standalone === true;   // iOS 加到主屏幕
+  const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  if (native) document.body.classList.add('native-shell');
+  else if (standalone) document.body.classList.add('pwa-standalone');
+})();
+
 $$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.editingId = null; render(); });
 $('#ledgerChip').onclick = openLedgerPicker;
 Theme.init();
