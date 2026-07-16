@@ -421,6 +421,82 @@ table.simple tr:last-child td { border-bottom: 0; }
 .debt-box.bad { border-left-color: var(--danger); }
 .debt-box.good { border-left-color: var(--brand-2); }
 
+/* ===== 顶部账本切换标签 ===== */
+.ledger-chip {
+  border: 0; cursor: pointer; border-radius: 20px;
+  background: rgba(255,255,255,.18); color: #fff;
+  padding: 5px 12px; font-size: .8rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 2px; max-width: 46vw;
+  white-space: nowrap; overflow: hidden;
+}
+.ledger-chip:hover { background: rgba(255,255,255,.28); }
+.ledger-chip #ledgerName { overflow: hidden; text-overflow: ellipsis; }
+.ledger-chip .lc-caret { opacity: .8; font-size: .7rem; }
+
+/* 账本切换弹窗 */
+.ledger-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.ledger-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  border: 1.5px solid var(--line); background: var(--card); border-radius: var(--r-md);
+  padding: 11px 13px; cursor: pointer; text-align: left; color: var(--text);
+}
+.ledger-row:hover { border-color: var(--brand-2); }
+.ledger-row.on { background: var(--brand-soft); border-color: var(--brand-2); }
+.ledger-row .lr-ico { font-size: 1.15rem; flex: 0 0 auto; }
+.ledger-row .lr-name { flex: 1; font-size: .88rem; font-weight: 600; }
+.ledger-row .lr-ck { color: var(--brand); font-weight: 800; }
+
+/* ===== 子标签栏（数据分析 / 设置） ===== */
+.subtab-bar {
+  display: flex; gap: 6px; margin-bottom: 14px;
+  background: var(--card); padding: 5px; border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+}
+.subtab {
+  flex: 1; border: 0; background: transparent; cursor: pointer;
+  padding: 9px 6px; border-radius: 10px; font-size: .86rem; font-weight: 600; color: var(--text-2);
+  transition: all .15s;
+}
+.subtab.on { background: var(--grad); color: #fff; box-shadow: 0 2px 8px var(--btn-shadow); }
+
+/* ===== 账户页 ===== */
+.acct-list { display: flex; flex-direction: column; gap: 8px; }
+.acct-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  border: 1px solid var(--line); background: var(--card); border-radius: var(--r-md);
+  padding: 11px 13px; cursor: pointer; text-align: left; color: var(--text);
+  transition: transform .1s, box-shadow .15s;
+}
+.acct-row:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.acct-row .ar-ico {
+  flex: 0 0 40px; width: 40px; height: 40px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+}
+.acct-row .ar-mid { flex: 1; min-width: 0; }
+.acct-row .ar-name { font-size: .9rem; font-weight: 700; display: block; }
+.acct-row .ar-name .ar-kind { font-size: .68rem; font-weight: 400; color: var(--text-3); font-style: normal; margin-left: 4px; }
+.acct-row .ar-sub { font-size: .72rem; color: var(--text-3); }
+.acct-row .ar-bal { font-size: 1.02rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.acct-row .ar-bal.neg { color: var(--danger); }
+
+.acct-pick { display: flex; align-items: center; gap: 10px; }
+
+/* 账户标签（明细里的小标记） */
+.e-acct {
+  font-size: .66rem; color: var(--text-3); background: var(--track);
+  border-radius: 6px; padding: 1px 5px; margin-left: 6px; font-weight: 500; white-space: nowrap;
+}
+
+/* 账本管理（设置页） */
+.ledger-manage { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.lm-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); }
+.lm-row:last-child { border-bottom: 0; }
+.lm-row .lm-ico { font-size: 1.1rem; }
+.lm-row .lm-name { flex: 1; font-size: .86rem; font-weight: 600; }
+.lm-row .lm-cnt { font-size: .72rem; color: var(--text-3); }
+.lm-row button { border: 0; background: none; cursor: pointer; font-size: .95rem; padding: 4px 5px; border-radius: 7px; color: var(--text-3); }
+.lm-row button:hover { background: var(--track); }
+.lm-row .lm-del:hover { color: var(--danger); }
+
 /* ===== 日期跳转选择器 ===== */
 .pk-sec { margin-bottom: 14px; }
 .pk-sec:last-child { margin-bottom: 0; }

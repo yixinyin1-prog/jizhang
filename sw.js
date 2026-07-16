@@ -1,5 +1,5 @@
 /* Service Worker：缓存应用外壳，实现离线使用 */
-const CACHE = 'jz-cache-v5';
+const CACHE = 'jz-cache-v6';
 const ASSETS = [
   './',
   './index.html',

@@ -5,6 +5,35 @@ const Store = (() => {
   const K_ENTRIES = 'jz.entries.v1';
   const K_CATS = 'jz.categories.v1';
   const K_SETTINGS = 'jz.settings.v1';
+  const K_ACCOUNTS = 'jz.accounts.v1';
+  const K_LEDGERS = 'jz.ledgers.v1';
+
+  /* ---------- 账户（资金账户，用来管余额、形成闭环）----------
+     每笔收支可绑定一个账户：支出从该账户扣、收入进该账户。
+     没绑定账户的记录，都算到「默认现金账户」名下（这样不折腾账户也能用）。
+     账户余额 = 期初余额 + 进账 − 出账 + 转入 − 转出
+     全部账户余额之和 = 积蓄（和「期初积蓄 + 收入 − 支出」一致，转账互相抵消）*/
+  const ACCOUNT_KINDS = [
+    { kind: 'cash',    name: '现金',     icon: '💵', color: '#67a97f' },
+    { kind: 'bank',    name: '储蓄卡',   icon: '🏦', color: '#4f7fd9' },
+    { kind: 'wechat',  name: '微信钱包', icon: '💚', color: '#3fae5a' },
+    { kind: 'alipay',  name: '支付宝',   icon: '💙', color: '#3d8bfd' },
+    { kind: 'savings', name: '存款理财', icon: '🐷', color: '#e08a52' },
+    { kind: 'other',   name: '其他账户', icon: '📁', color: '#8fa3ad' },
+  ];
+  const DEFAULT_ACCOUNTS = [
+    { id: 'cash', name: '现金', kind: 'cash', icon: '💵', color: '#67a97f', opening: 0, builtin: true },
+  ];
+  const DEFAULT_ACCT = 'cash';   // 没绑账户的记录归到它名下
+
+  /* ---------- 账本（多本账，参照随手记）----------
+     每笔记录属于一个账本；顶部可切换「全部账本」或某一本。
+     没设账本的记录都算「默认账本」，所以不开账本也能一起管理。 */
+  const DEFAULT_LEDGERS = [
+    { id: 'default', name: '日常账本', icon: '📒', color: '#0b8f66', builtin: true },
+  ];
+  const DEFAULT_LEDGER = 'default';
+  const LEDGER_ICONS = ['📒', '📓', '📔', '📕', '📗', '📘', '💼', '🏠', '✈️', '🚗', '🎮', '🍜', '💰', '👶', '🐱', '🎓', '🏥', '🛒', '❤️', '🌱'];
 
   /* debt 字段标记「往来款」，用于负债/债权核算：
      borrow=借入（钱进来但是欠的，负债+）  repay=还款（负债-）
@@ -71,6 +100,8 @@ const Store = (() => {
     // 当前积蓄 = 期初积蓄 + 累计收入 − 累计支出
     openingBalance: 0,
     openingDate: '',   // 期初的基准日；留空表示「第一笔记录之前」
+    activeLedger: 'all',   // 当前账本：'all'=全部一起，或某个账本 id
+    lastAcct: '',          // 记账时上次用的账户，方便下次默认选中
     backup: {
       enabled: false, onExit: true, times: ['08:00', '20:00'], keep: 14,
       lastRun: {}, dirName: '',
@@ -91,6 +122,23 @@ const Store = (() => {
   if (!categories) { categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)); saveJSON(K_CATS, categories); }
   let settings = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), loadJSON(K_SETTINGS, {}));
   settings.backup = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS.backup)), settings.backup || {});
+
+  let accounts = loadJSON(K_ACCOUNTS, null);
+  let ledgers = loadJSON(K_LEDGERS, null);
+  {
+    let migrated = false;
+    if (!accounts || !accounts.length) {
+      // 首次：建默认现金账户，把老的「期初积蓄」搬进它的期初余额
+      accounts = JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
+      accounts[0].opening = settings.openingBalance || 0;
+      migrated = true;
+    }
+    if (!ledgers || !ledgers.length) {
+      ledgers = JSON.parse(JSON.stringify(DEFAULT_LEDGERS));
+      migrated = true;
+    }
+    if (migrated) { saveJSON(K_ACCOUNTS, accounts); saveJSON(K_LEDGERS, ledgers); }
+  }
 
   // 迁移：老数据里的分类补上图标、往来款标记；补上新增的借入/收回分类
   {
@@ -127,6 +175,38 @@ const Store = (() => {
 
   const persistEntries = () => { dirty = true; saveJSON(K_ENTRIES, entries); };
   const persistCats = () => { dirty = true; saveJSON(K_CATS, categories); };
+  const persistAccounts = () => { dirty = true; saveJSON(K_ACCOUNTS, accounts); };
+  const persistLedgers = () => { dirty = true; saveJSON(K_LEDGERS, ledgers); };
+
+  /* ---------- 账本 ----------
+     当前账本作为一个过滤器：影响记账和数据分析；账户余额、净资产始终是全局的。 */
+  const getLedgers = () => ledgers;
+  const getLedger = (id) => ledgers.find(l => l.id === id) || null;
+  const activeLedger = () => settings.activeLedger || 'all';
+  function setActiveLedger(id) { settings.activeLedger = id || 'all'; saveJSON(K_SETTINGS, settings); }
+  /* 新记录默认落到哪个账本：选了具体账本就用它，「全部」时落到默认账本 */
+  const ledgerForNew = () => { const a = activeLedger(); return a === 'all' ? DEFAULT_LEDGER : a; };
+  const ledgerOf = (e) => e.ledgerId || DEFAULT_LEDGER;
+  function addLedger(name, extra) {
+    const id = 'l' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    const lg = Object.assign({ id, name, icon: '📒', color: randColor() }, extra || {});
+    ledgers.push(lg); persistLedgers(); return lg;
+  }
+  function updateLedger(id, patch) { const l = getLedger(id); if (l) { Object.assign(l, patch); persistLedgers(); } }
+  function removeLedger(id, moveTo) {
+    if (id === DEFAULT_LEDGER) return;            // 默认账本不可删
+    const target = moveTo || DEFAULT_LEDGER;
+    entries.forEach(e => { if (ledgerOf(e) === id) e.ledgerId = target; });
+    ledgers = ledgers.filter(l => l.id !== id);
+    if (settings.activeLedger === id) setActiveLedger('all');
+    persistLedgers(); persistEntries();
+  }
+
+  /* 受当前账本过滤后的记录（记账、数据分析都走它）。转账不参与收支统计。 */
+  function scoped() {
+    const a = activeLedger();
+    return a === 'all' ? entries : entries.filter(e => ledgerOf(e) === a);
+  }
 
   /* ---------- 分类 ---------- */
   const getCategories = (type) => type ? categories.filter(c => c.type === type) : categories;
@@ -191,26 +271,25 @@ const Store = (() => {
   }
 
   /* ---------- 记录 ---------- */
-  function addEntry(e) {
-    const entry = {
+  function shape(e) {
+    return {
       id: newId(),
       date: e.date,
       type: e.type,                       // 'expense' | 'income'
       amount: Math.round(e.amount * 100) / 100,
       note: (e.note || '').trim(),
       catId: e.catId !== undefined ? e.catId : categorize(e.note || '', e.type),
+      acctId: e.acctId || null,           // 绑定的资金账户；null=默认现金账户
+      ledgerId: e.ledgerId || ledgerForNew(),
       manual: !!e.manual,
     };
+  }
+  function addEntry(e) {
+    const entry = shape(e);
     entries.push(entry); persistEntries(); return entry;
   }
   function addEntries(list) {
-    const added = list.map(e => ({
-      id: newId(), date: e.date, type: e.type,
-      amount: Math.round(e.amount * 100) / 100,
-      note: (e.note || '').trim(),
-      catId: e.catId !== undefined ? e.catId : categorize(e.note || '', e.type),
-      manual: !!e.manual,
-    }));
+    const added = list.map(shape);
     entries.push(...added); persistEntries(); return added;
   }
   function updateEntry(id, patch) {
@@ -232,12 +311,13 @@ const Store = (() => {
     persistEntries(); return n;
   }
 
-  /* ---------- 查询与聚合 ---------- */
-  const getEntries = () => entries;
-  const byDate = (d) => entries.filter(e => e.date === d);
-  const inRange = (d1, d2) => entries.filter(e => e.date >= d1 && e.date <= d2);
-  const inMonth = (ym) => entries.filter(e => e.date.startsWith(ym));   // 'YYYY-MM'
-  const inYear = (y) => entries.filter(e => e.date.startsWith(y + '-'));
+  /* ---------- 查询与聚合 ----------
+     下面这些走当前账本过滤；账户余额/净资产另有专门函数，始终全局。 */
+  const getEntries = () => entries;                 // 全部记录（导出、账户余额用）
+  const byDate = (d) => scoped().filter(e => e.date === d);
+  const inRange = (d1, d2) => scoped().filter(e => e.date >= d1 && e.date <= d2);
+  const inMonth = (ym) => scoped().filter(e => e.date.startsWith(ym));   // 'YYYY-MM'
+  const inYear = (y) => scoped().filter(e => e.date.startsWith(y + '-'));
 
   /* 该笔记录属于哪种往来款（借入/还款/借出/收回），普通消费返回 null */
   function debtKindOf(e) {
@@ -248,9 +328,10 @@ const Store = (() => {
   function totals(list) {
     let ex = 0, inc = 0, exReal = 0, incReal = 0;
     for (const e of list) {
+      if (e.type === 'transfer') continue;   // 转账只是账户间挪钱，不算收支
       const isDebt = !!debtKindOf(e);
       if (e.type === 'expense') { ex += e.amount; if (!isDebt) exReal += e.amount; }
-      else { inc += e.amount; if (!isDebt) incReal += e.amount; }
+      else if (e.type === 'income') { inc += e.amount; if (!isDebt) incReal += e.amount; }
     }
     return {
       expense: r2(ex), income: r2(inc), balance: r2(inc - ex),
@@ -287,14 +368,78 @@ const Store = (() => {
      积蓄 = 期初积蓄 + 累计收入 − 累计支出（借入的钱进了口袋，所以算进积蓄；还款花出去，也从积蓄里扣）
      净资产 = 积蓄 + 别人欠我 − 我欠别人 */
   function assetsAsOf(dateStr) {
-    const list = entries.filter(e => e.date <= dateStr);
+    const list = entries.filter(e => e.date <= dateStr);   // 全局，不受账本影响
     const t = totals(list);
     const b = balanceAsOf(dateStr);
-    const savings = r2((settings.openingBalance || 0) + t.income - t.expense);
+    // 期初积蓄 = 各账户期初余额之和（迁移后账户是唯一来源）
+    const openBase = accounts.reduce((s, a) => s + (a.opening || 0), 0);
+    const savings = r2(openBase + t.income - t.expense);
     return {
       savings, debt: b.debt, credit: b.credit,
       net: r2(savings + b.credit - b.debt),
     };
+  }
+
+  /* ---------- 账户 ----------
+     账户余额、总额始终基于「全部记录」，与当前账本无关（钱是一个池子）。 */
+  const getAccountKinds = () => ACCOUNT_KINDS;
+  const getAccounts = () => accounts;
+  const getAccount = (id) => accounts.find(a => a.id === id) || null;
+  function addAccount(name, kind, opening, extra) {
+    const k = ACCOUNT_KINDS.find(x => x.kind === kind) || ACCOUNT_KINDS[0];
+    const id = 'a' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    const acc = Object.assign({ id, name, kind: k.kind, icon: k.icon, color: k.color, opening: r2(opening || 0) }, extra || {});
+    accounts.push(acc); persistAccounts(); return acc;
+  }
+  function updateAccount(id, patch) {
+    const a = getAccount(id); if (!a) return;
+    if (patch.opening !== undefined) patch.opening = r2(patch.opening);
+    Object.assign(a, patch); persistAccounts();
+  }
+  function removeAccount(id, moveTo) {
+    if (id === DEFAULT_ACCT) return;              // 默认现金账户不可删
+    const target = moveTo || null;                // 默认改成「未指定」(归到默认账户)
+    entries.forEach(e => {
+      if (e.acctId === id) e.acctId = target;
+      if (e.toAcctId === id) e.toAcctId = target;
+    });
+    accounts = accounts.filter(a => a.id !== id);
+    persistAccounts(); persistEntries();
+  }
+  /* 某账户余额（可选截至某日）。默认账户额外吸收所有没绑账户的记录。 */
+  function accountBalance(id, asOf) {
+    const acc = getAccount(id);
+    if (!acc) return 0;
+    let bal = acc.opening || 0;
+    const isDefault = id === DEFAULT_ACCT;
+    for (const e of entries) {
+      if (asOf && e.date > asOf) continue;
+      const belongs = e.acctId === id || (isDefault && !e.acctId);
+      if (e.type === 'transfer') {
+        // 转账两端都有明确账户（addTransfer 会补默认现金），照常加减
+        if (e.acctId === id) bal -= e.amount;                         // 转出
+        if (e.toAcctId === id) bal += e.amount;                       // 转入
+      } else if (belongs) {
+        if (e.type === 'expense') bal -= e.amount; else bal += e.amount;
+      }
+    }
+    return r2(bal);
+  }
+  /* 所有账户余额快照 + 总额 */
+  function accountsSnapshot(asOf) {
+    const rows = accounts.map(a => ({ ...a, balance: accountBalance(a.id, asOf) }));
+    const total = r2(rows.reduce((s, r) => s + r.balance, 0));
+    return { rows, total };
+  }
+  /* 记一笔转账（账户间挪钱，不计收支）*/
+  function addTransfer(t) {
+    const entry = {
+      id: newId(), date: t.date, type: 'transfer',
+      amount: r2(t.amount), note: (t.note || '').trim(),
+      acctId: t.acctId || DEFAULT_ACCT, toAcctId: t.toAcctId || DEFAULT_ACCT,
+      catId: null, ledgerId: t.ledgerId || ledgerForNew(),
+    };
+    entries.push(entry); persistEntries(); return entry;
   }
   /* 某年 12 个月的积蓄走势（月末快照） */
   function monthlySavingsSeries(year) {
@@ -431,26 +576,36 @@ const Store = (() => {
 
   /* ---------- 导入导出 ---------- */
   function exportAll() {
-    return { format: 'jz-backup-v1', exportedAt: new Date().toISOString(), settings, categories, entries };
+    return { format: 'jz-backup-v1', exportedAt: new Date().toISOString(), settings, categories, accounts, ledgers, entries };
   }
   function importBackup(obj, mode) {   // mode: 'replace' | 'merge'
     if (!obj || obj.format !== 'jz-backup-v1' || !Array.isArray(obj.entries)) throw new Error('文件格式不正确');
     if (mode === 'replace') {
       categories = obj.categories && obj.categories.length ? obj.categories : categories;
       entries = obj.entries;
+      if (obj.accounts && obj.accounts.length) accounts = obj.accounts;
+      if (obj.ledgers && obj.ledgers.length) ledgers = obj.ledgers;
       if (obj.settings) { settings = Object.assign({}, settings, obj.settings); saveJSON(K_SETTINGS, settings); }
     } else {
       const have = new Set(entries.map(e => e.id));
       for (const e of obj.entries) if (!have.has(e.id)) entries.push(e);
       const haveCat = new Set(categories.map(c => c.id));
       for (const c of (obj.categories || [])) if (!haveCat.has(c.id)) categories.push(c);
+      const haveAcc = new Set(accounts.map(a => a.id));
+      for (const a of (obj.accounts || [])) if (!haveAcc.has(a.id)) accounts.push(a);
+      const haveLg = new Set(ledgers.map(l => l.id));
+      for (const l of (obj.ledgers || [])) if (!haveLg.has(l.id)) ledgers.push(l);
     }
-    persistEntries(); persistCats();
+    persistEntries(); persistCats(); persistAccounts(); persistLedgers();
     return entries.length;
   }
   function clearAll() {
-    entries = []; categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
-    persistEntries(); persistCats();
+    entries = [];
+    categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+    accounts = JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
+    ledgers = JSON.parse(JSON.stringify(DEFAULT_LEDGERS));
+    setActiveLedger('all');
+    persistEntries(); persistCats(); persistAccounts(); persistLedgers();
   }
   function resetCategoriesToDefault() {
     categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
@@ -458,7 +613,7 @@ const Store = (() => {
   }
   function storageSize() {
     let n = 0;
-    for (const k of [K_ENTRIES, K_CATS, K_SETTINGS]) n += (localStorage.getItem(k) || '').length;
+    for (const k of [K_ENTRIES, K_CATS, K_SETTINGS, K_ACCOUNTS, K_LEDGERS]) n += (localStorage.getItem(k) || '').length;
     return n;
   }
 
@@ -468,6 +623,12 @@ const Store = (() => {
     getEntries, byDate, inRange, inMonth, inYear,
     totals, debtTotals, balanceAsOf, assetsAsOf, catTotals, monthlySeries, monthlyCatSeries,
     monthlyDebtSeries, monthlySavingsSeries, yearCatMatrix, buckets, years, unknownCount,
+    // 账户
+    getAccountKinds, getAccounts, getAccount, addAccount, updateAccount, removeAccount,
+    accountBalance, accountsSnapshot, addTransfer, DEFAULT_ACCT,
+    // 账本
+    getLedgers, getLedger, activeLedger, setActiveLedger, ledgerForNew, ledgerOf,
+    addLedger, updateLedger, removeLedger, DEFAULT_LEDGER,
     getSettings, updateSettings, getThemes, getTheme, isDirty, markClean,
     exportAll, importBackup, clearAll, resetCategoriesToDefault, storageSize,
   };

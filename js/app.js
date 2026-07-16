@@ -28,7 +28,7 @@ function weekdayCN(dstr) { return '日一二三四五六'[new Date(dstr + 'T00:0
 function debtLabel(v) {
   if (v > 0) return { text: fmtM(v), color: 'var(--danger)', tip: '' };
   if (v === 0) return { text: '0.00', color: 'var(--text-3)', tip: '' };
-  return { text: '净还 ' + fmtM(-v), color: 'var(--brand)', tip: '记录到的还款比借入多，可在「数据」页填写期初负债' };
+  return { text: '净还 ' + fmtM(-v), color: 'var(--brand)', tip: '记录到的还款比借入多，可在「账户」页填写期初负债' };
 }
 /* 收入分类关键词作为解析提示（排除与支出分类重复的词，避免误判） */
 function incomeHints() {
@@ -38,10 +38,14 @@ function incomeHints() {
 
 /* ---------- 全局状态 ---------- */
 const S = {
-  tab: 'record',
+  tab: 'record',              // record | accounts | analysis | settings
+  anaSub: 'detail',           // 数据分析的子页：detail | stats | compare
+  setSub: 'general',          // 设置的子页：general | category
+  recordMode: 'expense',      // 记账页：expense | income | transfer
   recordDate: todayStr(),
   parsed: [],
   manualType: 'expense',
+  manualAcct: '',             // 手动记账选的账户
   detailMonth: todayStr().slice(0, 7),
   detailFilter: 'all',
   detailSearch: '',
@@ -164,17 +168,104 @@ async function renderReminder() {
 function render() {
   $$('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === S.tab));
   renderReminder();
+  renderLedgerChip();
   const v = $('#view');
   switch (S.tab) {
     case 'record': v.innerHTML = viewRecord(); bindRecord(); break;
-    case 'detail': v.innerHTML = viewDetail(); bindDetail(); break;
-    case 'stats': v.innerHTML = viewStats(); bindStats(); break;
-    case 'compare': v.innerHTML = viewCompare(); bindCompare(); break;
-    case 'category': v.innerHTML = viewCategory(); bindCategory(); break;
-    case 'data': v.innerHTML = viewData(); bindData(); break;
+    case 'accounts': v.innerHTML = viewAccounts(); bindAccounts(); break;
+    case 'analysis': v.innerHTML = viewAnalysis(); bindAnalysis(); break;
+    case 'settings': v.innerHTML = viewSettings(); bindSettings(); break;
   }
   const kb = Store.storageSize();
   $('#storageHint').textContent = `${Store.getEntries().length} 笔 · ${(kb / 1024).toFixed(0)}KB`;
+}
+
+/* 顶部账本切换标签 */
+function renderLedgerChip() {
+  const el = $('#ledgerName');
+  if (!el) return;
+  const a = Store.activeLedger();
+  if (a === 'all') { el.textContent = '全部账本'; $('#ledgerChip').firstChild.textContent = '📚 '; }
+  else { const l = Store.getLedger(a); el.textContent = l ? l.name : '全部账本'; $('#ledgerChip').firstChild.textContent = (l && l.icon ? l.icon : '📒') + ' '; }
+}
+
+/* 数据分析：明细 / 统计 / 对比 三个子页合到一个标签下 */
+function viewAnalysis() {
+  const subs = [['detail', '📋 明细'], ['stats', '📊 统计'], ['compare', '📈 对比']];
+  const bar = `<div class="subtab-bar">${subs.map(([k, n]) =>
+    `<button class="subtab ${S.anaSub === k ? 'on' : ''}" data-sub="${k}">${n}</button>`).join('')}</div>`;
+  const inner = S.anaSub === 'stats' ? viewStats() : S.anaSub === 'compare' ? viewCompare() : viewDetail();
+  return bar + inner;
+}
+function bindAnalysis() {
+  $$('.subtab[data-sub]').forEach(b => b.onclick = () => { S.anaSub = b.dataset.sub; render(); });
+  if (S.anaSub === 'stats') bindStats();
+  else if (S.anaSub === 'compare') bindCompare();
+  else bindDetail();
+}
+
+/* 设置：常规（原「数据」页）+ 分类管理 */
+function viewSettings() {
+  const subs = [['general', '⚙️ 常规'], ['category', '🏷️ 分类管理']];
+  const bar = `<div class="subtab-bar">${subs.map(([k, n]) =>
+    `<button class="subtab ${S.setSub === k ? 'on' : ''}" data-sub="${k}">${n}</button>`).join('')}</div>`;
+  return bar + (S.setSub === 'category' ? viewCategory() : viewData());
+}
+function bindSettings() {
+  $$('.subtab[data-sub]').forEach(b => b.onclick = () => { S.setSub = b.dataset.sub; render(); });
+  if (S.setSub === 'category') bindCategory();
+  else bindData();
+}
+
+/* 跳转到数据分析的某个子页（供各处「查看明细」用） */
+function goDetail(filter) {
+  if (filter !== undefined) S.detailFilter = filter;
+  S.tab = 'analysis'; S.anaSub = 'detail'; render();
+}
+
+/* 顶部账本切换 / 快速新建 */
+async function openLedgerPicker() {
+  const body = document.createElement('div');
+  const active = Store.activeLedger();
+  const paint = () => {
+    const ledgers = Store.getLedgers();
+    const row = (id, icon, name, on) =>
+      `<button class="ledger-row ${on ? 'on' : ''}" data-id="${id}">
+         <span class="lr-ico">${icon}</span><span class="lr-name">${esc(name)}</span>${on ? '<span class="lr-ck">✓</span>' : ''}
+       </button>`;
+    body.innerHTML = `
+      <div class="ledger-list">
+        ${row('all', '📚', '全部账本（所有账目一起）', active === 'all')}
+        ${ledgers.map(l => row(l.id, l.icon || '📒', l.name, active === l.id)).join('')}
+      </div>
+      <button class="btn ghost block" id="lpAdd">＋ 新建账本</button>
+      <div class="sub" style="margin:8px 0 0">在「设置 → 常规」里可以改名、换图标或删除账本。</div>`;
+    body.querySelectorAll('.ledger-row').forEach(b => b.onclick = () => {
+      Store.setActiveLedger(b.dataset.id);
+      body._done(true);
+    });
+    $('#lpAdd', body).onclick = async () => {
+      const name = await Modal.prompt('新建账本', { placeholder: '例：生意账、旅行账、家庭账' });
+      if (!name) return;
+      const lg = Store.addLedger(name);
+      Store.setActiveLedger(lg.id);
+      body._done(true);
+    };
+  };
+  paint();
+  const changed = await Modal.open({
+    title: '账本', body, showCancel: true, okText: '完成',
+    getValue: () => true, onOpen: (m, done) => { body._done = done; },
+  });
+  if (changed) render();
+}
+
+/* 账户下拉选择器（记账页、编辑条目用）*/
+function acctSelect(acctId, cls) {
+  const accs = Store.getAccounts();
+  let html = `<select class="${cls || ''}">`;
+  for (const a of accs) html += `<option value="${a.id}" ${acctId === a.id ? 'selected' : ''}>${a.icon || '💼'} ${esc(a.name)}</option>`;
+  return html + '</select>';
 }
 
 function catSelect(catId, type, cls) {
@@ -183,6 +274,165 @@ function catSelect(catId, type, cls) {
   html += `<option value="" ${!catId ? 'selected' : ''}>❓ 待归类</option>`;
   for (const c of cats) html += `<option value="${c.id}" ${catId === c.id ? 'selected' : ''}>${c.icon || ''} ${esc(c.name)}</option>`;
   return html + '</select>';
+}
+
+/* 记账时用哪个账户：只有一个账户就不折腾，返回 null（归到现金） */
+function currentRecAcct() {
+  const accs = Store.getAccounts();
+  if (accs.length <= 1) return null;
+  const want = S.recordAcct || Store.getSettings().lastAcct || accs[0].id;
+  return accs.some(a => a.id === want) ? want : accs[0].id;
+}
+/* 记账页顶部的「记到账户」选择条：多于一个账户才显示 */
+function acctPickerRow() {
+  const accs = Store.getAccounts();
+  if (accs.length <= 1) return '';
+  const cur = currentRecAcct();
+  return `
+  <div class="acct-pick card" style="padding:12px 16px;margin-bottom:12px">
+    <span style="font-size:.86rem;font-weight:600">记到账户</span>
+    <select id="recAcct" style="flex:1">
+      ${accs.map(a => `<option value="${a.id}" ${cur === a.id ? 'selected' : ''}>${a.icon || '💼'} ${esc(a.name)}（余 ${fmtM(Store.accountBalance(a.id))}）</option>`).join('')}
+    </select>
+    <button class="btn ghost small" id="recTransfer">🔄 转账</button>
+  </div>`;
+}
+
+/* ============================================================
+   账户页
+============================================================ */
+function kindName(k) { const x = Store.getAccountKinds().find(z => z.kind === k); return x ? x.name : '其他'; }
+
+function viewAccounts() {
+  const as = Store.assetsAsOf('9999-12-31');
+  const snap = Store.accountsSnapshot();
+  const dl = debtLabel(as.debt);
+  return `
+  <div class="hero">
+    <div class="h-label">净资产</div>
+    <div class="h-big">¥ ${fmtM(as.net)}</div>
+    <div class="h-row">
+      <div class="h-item"><div class="h-label">账户总余额</div><div class="h-val">${fmtM(snap.total)}</div></div>
+      <div class="h-item"><div class="h-label">我欠别人</div><div class="h-val">${dl.text}</div></div>
+      <div class="h-item"><div class="h-label">别人欠我</div><div class="h-val">${fmtM(as.credit)}</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>💼 我的账户
+      <span style="float:right;font-size:.82rem;font-weight:700">总余额 ${fmtM(snap.total)}</span>
+    </h3>
+    <div class="sub">记账时选对应账户，余额自动增减，形成闭环。没选账户的记录都算到「现金」名下。</div>
+    <div class="acct-list">
+      ${snap.rows.map(a => `
+        <button class="acct-row" data-id="${a.id}">
+          <span class="ar-ico" style="background:color-mix(in srgb, ${a.color} 16%, transparent)">${a.icon || '💼'}</span>
+          <span class="ar-mid">
+            <span class="ar-name">${esc(a.name)}${a.builtin || kindName(a.kind) === a.name ? '' : ` <i class="ar-kind">${kindName(a.kind)}</i>`}</span>
+            <span class="ar-sub">期初 ${fmtM(a.opening)}</span>
+          </span>
+          <span class="ar-bal ${a.balance < 0 ? 'neg' : ''}">${fmtM(a.balance)}</span>
+        </button>`).join('')}
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="acAdd">＋ 新建账户</button>
+      <button class="btn ghost" id="acTransfer">🔄 转账</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🏦 负债与债权（期初）</h3>
+    <div class="sub">开始记账<b>之前</b>就欠着的 / 别人欠你的。之后的借入还款按记账自动累计。<br>
+      净资产 = 账户总余额 ＋ 别人欠我 − 我欠别人</div>
+    <div class="set-row">
+      <div class="sr-t"><b>期初负债（我欠别人）</b><span>花呗、分付、信用卡已用额度、跟人借的</span></div>
+      <input type="number" id="opDebt" value="${Store.getSettings().openingDebt || 0}" step="0.01" style="flex:0 0 130px">
+    </div>
+    <div class="set-row">
+      <div class="sr-t"><b>期初债权（别人欠我）</b><span>记账前别人欠我的钱</span></div>
+      <input type="number" id="opCredit" value="${Store.getSettings().openingCredit || 0}" step="0.01" style="flex:0 0 130px">
+    </div>
+    <div class="debt-strip" style="margin-top:12px">
+      <div class="debt-box good"><div class="d-label">积蓄</div><div class="d-val">${fmtM(as.savings)}</div></div>
+      <div class="debt-box ${as.debt > 0 ? 'bad' : ''}" title="${dl.tip}"><div class="d-label">负债</div><div class="d-val" style="color:${dl.color}">${dl.text}</div></div>
+      <div class="debt-box ${as.credit > 0 ? 'warn' : ''}"><div class="d-label">债权</div><div class="d-val">${fmtM(as.credit)}</div></div>
+      <div class="debt-box ${as.net >= 0 ? 'good' : 'bad'}"><div class="d-label">净资产</div><div class="d-val" style="color:${as.net >= 0 ? 'var(--brand)' : 'var(--danger)'}">${fmtM(as.net)}</div></div>
+    </div>
+  </div>`;
+}
+
+function bindAccounts() {
+  $$('.acct-row').forEach(b => b.onclick = () => editAccount(b.dataset.id));
+  $('#acAdd').onclick = () => editAccount(null);
+  $('#acTransfer').onclick = doTransfer;
+  $('#opDebt').onchange = ev => { Store.updateSettings({ openingDebt: Math.round((parseFloat(ev.target.value) || 0) * 100) / 100 }); render(); };
+  $('#opCredit').onchange = ev => { Store.updateSettings({ openingCredit: Math.round((parseFloat(ev.target.value) || 0) * 100) / 100 }); render(); };
+}
+
+async function editAccount(id) {
+  const acc = id ? Store.getAccount(id) : null;
+  const kinds = Store.getAccountKinds();
+  const body = document.createElement('div');
+  body.innerHTML = `
+    <label class="fld">账户名称</label>
+    <input class="af-name" type="text" value="${acc ? esc(acc.name) : ''}" placeholder="例：招商银行卡、老婆的微信">
+    <label class="fld">账户类型</label>
+    <select class="af-kind">${kinds.map(k => `<option value="${k.kind}" ${(acc ? acc.kind : 'bank') === k.kind ? 'selected' : ''}>${k.icon} ${k.name}</option>`).join('')}</select>
+    <label class="fld">${acc ? '期初余额（这个账户最初有多少钱）' : '当前余额（这个账户现在有多少钱）'}</label>
+    <input class="af-open" type="number" step="0.01" value="${acc ? acc.opening : ''}" placeholder="0">
+    ${acc ? `<div class="sub" style="margin:8px 0 0">当前余额 <b>${fmtM(Store.accountBalance(acc.id))}</b>（= 期初 ＋ 之后的进出）</div>` : ''}
+    ${acc && !acc.builtin ? `<button class="btn danger block af-del" style="margin-top:14px">删除这个账户</button>` : ''}`;
+  const res = await Modal.open({
+    title: acc ? '编辑账户' : '新建账户', body, okText: acc ? '保存' : '创建',
+    getValue: (m) => ({
+      name: m.querySelector('.af-name').value.trim(),
+      kind: m.querySelector('.af-kind').value,
+      opening: m.querySelector('.af-open').value,
+    }),
+    onOpen: (m, done) => {
+      const del = m.querySelector('.af-del');
+      if (del) del.onclick = async () => {
+        done(null);
+        if (await Modal.confirm('删除账户', { text: `删除「${esc(acc.name)}」？该账户下的记录会转到「现金」名下，余额并入现金。`, danger: true, okText: '删除' })) {
+          Store.removeAccount(acc.id); toast('已删除'); render();
+        }
+      };
+    },
+  });
+  if (!res) return;
+  if (!res.name) { toast('请填账户名称'); return; }
+  const opening = Math.round((parseFloat(res.opening) || 0) * 100) / 100;
+  if (acc) {
+    const k = kinds.find(x => x.kind === res.kind) || kinds[0];
+    const patch = { name: res.name, opening };
+    if (res.kind !== acc.kind) { patch.kind = k.kind; patch.icon = k.icon; patch.color = k.color; }
+    Store.updateAccount(id, patch);
+    toast('已保存');
+  } else {
+    Store.addAccount(res.name, res.kind, opening);
+    toast('账户已创建');
+  }
+  render();
+}
+
+async function doTransfer() {
+  const accs = Store.getAccounts();
+  if (accs.length < 2) { toast('先建两个以上账户才能转账'); return; }
+  const opts = accs.map(a => ({ value: a.id, label: `${a.icon || '💼'} ${a.name}` }));
+  const res = await Modal.form('转账（账户间挪钱，不计收支）', [
+    { key: 'from', label: '从', type: 'select', value: accs[0].id, options: opts },
+    { key: 'to', label: '到', type: 'select', value: accs[1].id, options: opts },
+    { key: 'amount', label: '金额', type: 'number', value: '' },
+    { key: 'date', label: '日期', type: 'date', value: todayStr() },
+    { key: 'note', label: '备注（可选）', value: '' },
+  ], { okText: '转账' });
+  if (!res) return;
+  const amt = Math.round((parseFloat(res.amount) || 0) * 100) / 100;
+  if (!amt || amt <= 0) { toast('请输入金额'); return; }
+  if (res.from === res.to) { toast('两个账户不能相同'); return; }
+  Store.addTransfer({ date: res.date || todayStr(), amount: amt, acctId: res.from, toAcctId: res.to, note: res.note });
+  toast('转账已记录');
+  render();
 }
 
 /* ============================================================
@@ -203,6 +453,7 @@ function viewRecord() {
       <div class="h-item"><div class="h-label">当日支出</div><div class="h-val">${fmtM(t.expense)}</div></div>
     </div>
   </div>
+  ${acctPickerRow()}
   <div class="layout-wide">
   <div class="col">
   <div class="card">
@@ -258,7 +509,16 @@ function renderParseList() {
     </div>`).join('');
 }
 
+/* 是否需要显示账户标签（有多个账户时才有意义） */
+function showAcct() { return Store.getAccounts().length > 1; }
+function acctTag(e) {
+  if (!showAcct()) return '';
+  const a = e.acctId ? Store.getAccount(e.acctId) : Store.getAccount(Store.DEFAULT_ACCT);
+  return a ? `<span class="e-acct">${a.icon || '💼'}${esc(a.name)}</span>` : '';
+}
+
 function entryRow(e) {
+  if (e.type === 'transfer') return transferRow(e);
   const c = e.catId ? Store.getCat(e.catId) : null;
   const name = c ? c.name : '待归类';
   const color = c ? c.color : '#b0b8b5';
@@ -268,11 +528,25 @@ function entryRow(e) {
   <div class="entry" data-id="${e.id}">
     <span class="e-ico chip" style="background:color-mix(in srgb, ${color} 15%, transparent)" title="点击编辑">${icon}</span>
     <span class="e-mid">
-      <div class="e-cat ${c ? '' : 'unknown'}">${esc(name)}</div>
+      <div class="e-cat ${c ? '' : 'unknown'}">${esc(name)}${acctTag(e)}</div>
       <div class="e-note">${esc(e.note) || '（无备注）'}</div>
     </span>
     <span class="e-amt ${e.type === 'expense' ? 'amt-expense' : 'amt-income'}">${e.type === 'expense' ? '-' : '+'}${fmtM(e.amount)}</span>
     <span class="e-ops"><button class="op-edit" title="编辑">✏️</button><button class="op-del" title="删除">🗑</button></span>
+  </div>`;
+}
+
+function transferRow(e) {
+  const from = Store.getAccount(e.acctId) || {}, to = Store.getAccount(e.toAcctId) || {};
+  return `
+  <div class="entry" data-id="${e.id}">
+    <span class="e-ico chip" style="background:color-mix(in srgb, #7c8b99 15%, transparent)">🔄</span>
+    <span class="e-mid">
+      <div class="e-cat">转账 <span class="e-acct">${from.icon || '💼'}${esc(from.name || '?')}</span> → <span class="e-acct">${to.icon || '💼'}${esc(to.name || '?')}</span></div>
+      <div class="e-note">${esc(e.note) || '账户间挪钱'}</div>
+    </span>
+    <span class="e-amt" style="color:var(--text-2)">${fmtM(e.amount)}</span>
+    <span class="e-ops"><button class="op-del" title="删除">🗑</button></span>
   </div>`;
 }
 
@@ -291,6 +565,7 @@ function entryEditor(e) {
       <input class="ed-note" type="text" value="${esc(e.note)}">
       <input class="ed-date narrow" type="date" value="${e.date}" style="flex:0 0 130px">
     </div>
+    ${showAcct() ? `<div class="row" style="width:100%;margin-top:6px"><span style="flex:0 0 auto;font-size:.78rem;color:var(--text-3)">账户</span>${acctSelect(e.acctId || Store.DEFAULT_ACCT, 'ed-acct')}</div>` : ''}
     <div class="row" style="width:100%;margin-top:6px">
       <button class="btn small ed-save">保存</button>
       <button class="btn small ghost ed-cancel">取消</button>
@@ -299,6 +574,10 @@ function entryEditor(e) {
 }
 
 function bindRecord() {
+  const ra = $('#recAcct');
+  if (ra) ra.onchange = (ev) => { S.recordAcct = ev.target.value; Store.updateSettings({ lastAcct: ev.target.value }); render(); };
+  const rt = $('#recTransfer');
+  if (rt) rt.onclick = doTransfer;
   $('#recDate').onchange = (ev) => { S.recordDate = ev.target.value || todayStr(); render(); };
   $('#btnParse').onclick = () => {
     const text = $('#smartText').value.trim();
@@ -332,7 +611,8 @@ function bindRecord() {
   if (saveBtn) saveBtn.onclick = () => {
     const valid = S.parsed.filter(p => p.amount > 0);
     if (!valid.length) { toast('没有有效条目'); return; }
-    Store.addEntries(valid.map(p => ({ date: S.recordDate, type: p.type, amount: p.amount, note: p.note, catId: p.catId, manual: !!p.manual })));
+    const acct = currentRecAcct();
+    Store.addEntries(valid.map(p => ({ date: S.recordDate, type: p.type, amount: p.amount, note: p.note, catId: p.catId, acctId: acct, manual: !!p.manual })));
     S.parsed = []; S._smartText = '';
     toast(`已保存 ${valid.length} 笔 ✔`);
     render();
@@ -348,7 +628,7 @@ function bindRecord() {
     const amt = parseFloat($('#mAmt').value);
     if (!amt || amt <= 0) { toast('请输入金额'); return; }
     const catId = $('.m-cat').value || null;
-    Store.addEntry({ date: S.recordDate, type: S.manualType, amount: amt, note: $('#mNote').value, catId, manual: !!catId });
+    Store.addEntry({ date: S.recordDate, type: S.manualType, amount: amt, note: $('#mNote').value, catId, acctId: currentRecAcct(), manual: !!catId });
     toast('已保存 ✔'); render();
   };
   bindEntryOps($('#view'));
@@ -368,14 +648,17 @@ function bindEntryOps(root) {
       S.editingId = id; render();
     } else if (ev.target.classList.contains('ed-save')) {
       const type = row.querySelector('.ed-inc').classList.contains('on-income') ? 'income' : 'expense';
-      Store.updateEntry(id, {
+      const acctSel = row.querySelector('.ed-acct');
+      const patch = {
         type,
         amount: parseFloat(row.querySelector('.ed-amt').value) || e.amount,
         note: row.querySelector('.ed-note').value,
         date: row.querySelector('.ed-date').value || e.date,
         catId: row.querySelector('.ed-cat').value || null,
         manual: true,
-      });
+      };
+      if (acctSel) patch.acctId = acctSel.value === Store.DEFAULT_ACCT ? null : acctSel.value;
+      Store.updateEntry(id, patch);
       S.editingId = null; toast('已更新 ✔'); render();
     } else if (ev.target.classList.contains('ed-cancel')) {
       S.editingId = null; render();
@@ -617,7 +900,7 @@ function viewStats() {
   </div>
   <div class="card">
     <h3>💰 积蓄与负债走势</h3>
-    <div class="sub">积蓄 = 期初积蓄 ＋ 累计收入 − 累计支出，可在「数据」页设期初</div>
+    <div class="sub">积蓄 = 期初积蓄 ＋ 累计收入 − 累计支出，可在「账户」页设期初</div>
     <div class="chart-wrap" id="savingsChart"></div>
     <div class="legend">
       <span class="lg"><span class="dot" style="background:#0b8f66"></span>月末积蓄</span>
@@ -669,7 +952,7 @@ function bindStats() {
     else S.detailFilter = 'cat:' + cid;
     const [d1] = statsRange();
     S.detailMonth = d1.slice(0, 7);
-    S.tab = 'detail'; render();
+    S.tab = 'analysis'; S.anaSub = 'detail'; render();
   });
 
   const [d1, d2] = statsRange();
@@ -1095,7 +1378,7 @@ function bindCmpCatAll(years) {
     $('#oneCatDetail').onclick = () => {
       S.detailFilter = S.cmpCat === '__unknown__' ? 'unknown' : 'cat:' + S.cmpCat;
       S.detailMonth = years[years.length - 1] + '-01';
-      S.tab = 'detail'; render();
+      S.tab = 'analysis'; S.anaSub = 'detail'; render();
     };
 
     // 逐月明细表
@@ -1156,7 +1439,7 @@ function bindCmpCatAll(years) {
       e.stopPropagation();
       S.detailFilter = r.id === '__unknown__' ? 'unknown' : 'cat:' + r.id;
       S.detailMonth = years[years.length - 1] + '-01';
-      S.tab = 'detail'; render();
+      S.tab = 'analysis'; S.anaSub = 'detail'; render();
     };
     grid.appendChild(card);
   }
@@ -1326,7 +1609,7 @@ function bindCategory() {
     const n = Store.recategorize(false); toast(`已更新 ${n} 笔`); render();
   };
   const gu = $('#btnGoUnknown');
-  if (gu) gu.onclick = () => { S.detailFilter = 'unknown'; S.tab = 'detail'; render(); };
+  if (gu) gu.onclick = () => { S.detailFilter = 'unknown'; S.tab = 'analysis'; S.anaSub = 'detail'; render(); };
   $('#btnResetCats').onclick = async () => {
     if (!(await Modal.confirm('恢复默认分类', {
       text: '自定义分类会被移除，这些分类下的记录变成「未知」（记录本身不会丢，可以重新归类）。',
@@ -1373,7 +1656,7 @@ function bindCategory() {
   const c = Store.getCat(id);
 
   $('#cpClose').onclick = () => { S.catOpen = null; render(); };
-  $('#cpDetail').onclick = () => { S.detailFilter = 'cat:' + id; S.tab = 'detail'; render(); };
+  $('#cpDetail').onclick = () => { S.detailFilter = 'cat:' + id; S.tab = 'analysis'; S.anaSub = 'detail'; render(); };
   $('#cpDel').onclick = async () => {
     const n = Store.getEntries().filter(e => e.catId === id).length;
     if (!(await Modal.confirm(`删除分类「${c.name}」`, {
@@ -1421,34 +1704,32 @@ function viewData() {
   const cur = st.theme;
   const as = Store.assetsAsOf('9999-12-31');
 
+  const ledgers = Store.getLedgers();
   return `
-  <div class="hero">
-    <div class="h-label">净资产</div>
-    <div class="h-big">¥ ${fmtM(as.net)}</div>
-    <div class="h-row">
-      <div class="h-item"><div class="h-label">当前积蓄</div><div class="h-val">${fmtM(as.savings)}</div></div>
-      <div class="h-item"><div class="h-label">当前负债</div><div class="h-val">${debtLabel(as.debt).text}</div></div>
-      <div class="h-item"><div class="h-label">别人欠我</div><div class="h-val">${fmtM(as.credit)}</div></div>
+  <div class="card">
+    <h3>📚 账本管理</h3>
+    <div class="sub">多本账分开记（生活、生意、旅行…）。顶部标签可切换当前账本；选「全部」时所有账目一起看。</div>
+    <div class="ledger-manage">
+      ${ledgers.map(l => `
+        <div class="lm-row" data-id="${l.id}">
+          <span class="lm-ico">${l.icon || '📒'}</span>
+          <span class="lm-name">${esc(l.name)}${l.builtin ? ' <i style="font-size:.7rem;color:var(--text-3)">默认</i>' : ''}</span>
+          <span class="lm-cnt">${Store.getEntries().filter(e => Store.ledgerOf(e) === l.id).length} 笔</span>
+          <button class="lm-edit" title="改名/图标">✏️</button>
+          ${l.builtin ? '' : '<button class="lm-del" title="删除">🗑</button>'}
+        </div>`).join('')}
     </div>
+    <button class="btn ghost block" id="lmAdd">＋ 新建账本</button>
   </div>
-  ${as.debt < 0 ? '<div class="sub" style="margin:-6px 2px 14px">负债显示「净还」说明记录到的还款比借入多（早期用花呗付款时没记「借」），把下面的期初负债填上就对了。</div>' : ''}
 
   <div class="card">
-    <h3>💼 期初资产</h3>
-    <div class="sub">开始记账<b>之前</b>的家底。填了它，上面的「积蓄」和「负债」才是真实数字。<br>
-      积蓄 = 期初积蓄 ＋ 累计收入 − 累计支出　｜　负债 = 期初负债 ＋ 累计借入 − 累计还款　｜　净资产 = 积蓄 ＋ 别人欠我 − 我欠别人</div>
-    <div class="set-row">
-      <div class="sr-t"><b>期初积蓄</b><span>记账前手头有的钱：存款＋余额宝＋现金等</span></div>
-      <input type="number" id="opBalance" value="${st.openingBalance || 0}" step="0.01" style="flex:0 0 130px">
+    <h3>💼 资产与账户</h3>
+    <div class="sub">净资产、各账户余额、期初负债/债权都在「账户」标签页管理。</div>
+    <div class="debt-strip">
+      <div class="debt-box good"><div class="d-label">净资产</div><div class="d-val" style="color:${as.net >= 0 ? 'var(--brand)' : 'var(--danger)'}">${fmtM(as.net)}</div></div>
+      <div class="debt-box"><div class="d-label">账户总余额</div><div class="d-val">${fmtM(Store.accountsSnapshot().total)}</div></div>
     </div>
-    <div class="set-row">
-      <div class="sr-t"><b>期初负债</b><span>记账前就欠着的：花呗、分付、信用卡已用额度、跟人借的</span></div>
-      <input type="number" id="opDebt" value="${st.openingDebt || 0}" step="0.01" style="flex:0 0 130px">
-    </div>
-    <div class="set-row">
-      <div class="sr-t"><b>期初债权</b><span>记账前别人欠我的</span></div>
-      <input type="number" id="opCredit" value="${st.openingCredit || 0}" step="0.01" style="flex:0 0 130px">
-    </div>
+    <button class="btn ghost block" id="goAccounts" style="margin-top:10px">去「账户」页管理 →</button>
   </div>
 
   <div class="card">
@@ -1880,14 +2161,36 @@ function bindData() {
   /* 主题 */
   $$('[data-theme]').forEach(el => el.onclick = () => { Theme.set(el.dataset.theme); render(); });
 
-  /* 期初资产 */
-  const setOpening = (key, label) => (ev) => {
-    Store.updateSettings({ [key]: Math.round((parseFloat(ev.target.value) || 0) * 100) / 100 });
-    toast(label + '已更新'); render();
+  /* 去账户页 */
+  const ga = $('#goAccounts');
+  if (ga) ga.onclick = () => { S.tab = 'accounts'; render(); };
+
+  /* 账本管理 */
+  const lmAdd = $('#lmAdd');
+  if (lmAdd) lmAdd.onclick = async () => {
+    const name = await Modal.prompt('新建账本', { placeholder: '例：生意账、旅行账、家庭账' });
+    if (name) { Store.addLedger(name); toast('账本已创建'); render(); }
   };
-  $('#opBalance').onchange = setOpening('openingBalance', '期初积蓄');
-  $('#opDebt').onchange = setOpening('openingDebt', '期初负债');
-  $('#opCredit').onchange = setOpening('openingCredit', '期初债权');
+  $$('.lm-row').forEach(row => {
+    const id = row.dataset.id;
+    const editBtn = row.querySelector('.lm-edit');
+    if (editBtn) editBtn.onclick = async () => {
+      const l = Store.getLedger(id);
+      const res = await Modal.form('编辑账本', [
+        { key: 'name', label: '账本名称', value: l.name },
+        { key: 'icon', label: '图标（emoji）', value: l.icon || '📒', hint: '可从手机表情里挑一个，例如 💼 ✈️ 🏠 🐱' },
+      ], { okText: '保存' });
+      if (res && res.name.trim()) { Store.updateLedger(id, { name: res.name.trim(), icon: res.icon.trim() || '📒' }); render(); }
+    };
+    const delBtn = row.querySelector('.lm-del');
+    if (delBtn) delBtn.onclick = async () => {
+      const l = Store.getLedger(id);
+      const cnt = Store.getEntries().filter(e => Store.ledgerOf(e) === id).length;
+      if (await Modal.confirm('删除账本', { text: `删除「${esc(l.name)}」？${cnt ? `它的 ${cnt} 笔记录会移到「日常账本」。` : ''}`, danger: true, okText: '删除' })) {
+        Store.removeLedger(id); toast('已删除'); render();
+      }
+    };
+  });
 
   /* 自动备份设置 */
   const refreshBackupUI = async () => {
@@ -2161,11 +2464,12 @@ function importHistory(obj) {
 
 /* ---------- 启动 ---------- */
 $$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.editingId = null; render(); });
+$('#ledgerChip').onclick = openLedgerPicker;
 Theme.init();
 render();
-/* 自动备份完成后提示一下，并刷新数据页的备份列表 */
+/* 自动备份完成后提示一下，并刷新设置页的备份列表 */
 window.onBackupDone = (res, time) => {
   toast(`⏰ ${time} 自动备份完成 → ${res.where}`);
-  if (S.tab === 'data') render();
+  if (S.tab === 'settings' && S.setSub === 'general') render();
 };
 Backup.start();
