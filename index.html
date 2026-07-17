@@ -6,25 +6,25 @@
 <meta name="theme-color" content="#0b8f66">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="生活记账">
+<meta name="apple-mobile-web-app-title" content="富财记">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" href="icons/icon-192.png">
-<title>生活记账</title>
+<title>富财记</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <span class="logo"><span class="logo-mark">¥</span>生活记账</span>
+    <span class="logo"><span class="logo-mark">¥</span>富财记</span>
     <button id="ledgerChip" class="ledger-chip" title="切换 / 管理账本">📒 <span id="ledgerName">全部账本</span> <span class="lc-caret">▾</span></button>
     <span id="storageHint" class="storage-hint"></span>
   </div>
   <nav class="tabbar">
     <button class="tab active" data-tab="record"><span class="tab-icon">✏️</span><span>记账</span></button>
-    <button class="tab" data-tab="accounts"><span class="tab-icon">💼</span><span>账户</span></button>
+    <button class="tab" data-tab="finance"><span class="tab-icon">🎯</span><span>财务管理</span></button>
     <button class="tab" data-tab="analysis"><span class="tab-icon">📊</span><span>数据分析</span></button>
-    <button class="tab" data-tab="settings"><span class="tab-icon">⚙️</span><span>设置</span></button>
+    <button class="tab" data-tab="settings"><span class="tab-icon">👤</span><span>个人中心</span></button>
   </nav>
 </header>
 
@@ -35,6 +35,7 @@
 
 <script src="js/store.js"></script>
 <script src="js/theme.js"></script>
+<script src="js/license.js"></script>
 <script src="js/modal.js"></script>
 <script src="js/parser.js"></script>
 <script src="js/charts.js"></script>

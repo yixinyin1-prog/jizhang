@@ -1,11 +1,12 @@
 /* Service Worker：缓存应用外壳，实现离线使用 */
-const CACHE = 'jz-cache-v8';
+const CACHE = 'jz-cache-v12';
 const ASSETS = [
   './',
   './index.html',
   './css/style.css',
   './js/store.js',
   './js/theme.js',
+  './js/license.js',
   './js/modal.js',
   './js/parser.js',
   './js/charts.js',
@@ -15,6 +16,7 @@ const ASSETS = [
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/creator-qr.png',
 ];
 
 self.addEventListener('install', (e) => {

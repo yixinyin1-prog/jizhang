@@ -42,6 +42,10 @@ const S = {
   tab: 'record',              // record | accounts | analysis | settings
   anaSub: 'detail',           // 数据分析的子页：detail | stats | compare
   setSub: 'general',          // 设置的子页：general | category
+  finSub: 'budget',           // 财务管理的子页：budget | goals | accounts
+  finPeriod: 'month',         // 财务管理看月还是看年
+  finAnchor: todayStr(),      // 财务管理当前锚点日期
+  finChart: 'bar',            // 中位数/平均数图形态：bar | line
   recordMode: 'expense',      // 记账页：expense | income | transfer
   recordDate: todayStr(),
   parsed: [],
@@ -173,7 +177,10 @@ function render() {
   const v = $('#view');
   switch (S.tab) {
     case 'record': v.innerHTML = viewRecord(); bindRecord(); break;
-    case 'accounts': v.innerHTML = viewAccounts(); bindAccounts(); break;
+    case 'accounts':   // 账户已并入财务管理，老入口重定向过去
+      S.tab = 'finance'; S.finSub = 'accounts';
+      v.innerHTML = viewFinance(); bindFinance(); break;
+    case 'finance': v.innerHTML = viewFinance(); bindFinance(); break;
     case 'analysis': v.innerHTML = viewAnalysis(); bindAnalysis(); break;
     case 'settings': v.innerHTML = viewSettings(); bindSettings(); break;
   }
@@ -205,17 +212,121 @@ function bindAnalysis() {
   else bindDetail();
 }
 
-/* 设置：常规（原「数据」页）+ 分类管理 */
+/* 个人中心：我的（资料/授权/联系作者）+ 常规（原「数据」页）+ 分类管理 */
 function viewSettings() {
-  const subs = [['general', '⚙️ 常规'], ['category', '🏷️ 分类管理']];
+  const subs = [['general', '⚙️ 常规'], ['category', '🏷️ 分类'], ['me', '👤 我的']];
   const bar = `<div class="subtab-bar">${subs.map(([k, n]) =>
     `<button class="subtab ${S.setSub === k ? 'on' : ''}" data-sub="${k}">${n}</button>`).join('')}</div>`;
-  return bar + (S.setSub === 'category' ? viewCategory() : viewData());
+  const inner = S.setSub === 'category' ? viewCategory() : S.setSub === 'general' ? viewData() : viewMe();
+  return bar + inner;
 }
 function bindSettings() {
   $$('.subtab[data-sub]').forEach(b => b.onclick = () => { S.setSub = b.dataset.sub; render(); });
   if (S.setSub === 'category') bindCategory();
-  else bindData();
+  else if (S.setSub === 'general') bindData();
+  else bindMe();
+}
+
+/* ---------- 我的（资料 + 授权 + 联系作者）---------- */
+function viewMe() {
+  const p = Store.getSettings().profile || {};
+  const licReq = License.required();
+  return `
+  <div class="card">
+    <h3>👤 我的资料</h3>
+    <div class="sub">存在本机、不上传，仅作标识用（不是账号登录，换设备靠备份文件迁移）。</div>
+    <label class="fld">昵称</label>
+    <input type="text" id="pfName" value="${esc(p.name || '')}" placeholder="给自己起个名字">
+    <label class="fld">手机号（可选）</label>
+    <input type="text" id="pfPhone" value="${esc(p.phone || '')}" placeholder="仅本机保存" inputmode="tel">
+    <label class="fld">邮箱（可选）</label>
+    <input type="text" id="pfEmail" value="${esc(p.email || '')}" placeholder="仅本机保存" inputmode="email">
+    <button class="btn block" id="pfSave">保存资料</button>
+  </div>
+
+  <div class="card" id="licenseCard">
+    <h3>🔑 授权状态</h3>
+    <div id="licBody"><div class="sub" style="margin:0">读取中…</div></div>
+  </div>
+
+  <div class="card">
+    <h3>📮 联系作者</h3>
+    <div class="sub">授权获取使用权限、程序优化建议、问题反馈，都欢迎联系。</div>
+    ${contactBoxHtml()}
+  </div>`;
+}
+
+/* 联系作者二维码区（个人中心 和 授权闸门 共用） */
+function contactBoxHtml() {
+  return `
+    <div class="contact-box">
+      <img class="contact-qr" src="icons/creator-qr.png" alt="作者微信二维码"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <div class="contact-fallback" style="display:none">还没放二维码图片<br>
+        <span style="font-size:.72rem">把作者微信二维码存成 icons/creator-qr.png 就会显示在这里</span>
+      </div>
+      <div class="contact-tip">微信扫码添加作者<br><span>获取授权码 · 提优化建议 · 反馈问题</span></div>
+    </div>`;
+}
+
+/* 联系作者弹窗（授权闸门里用——那时候用户还进不了个人中心）*/
+async function openContactModal() {
+  const body = document.createElement('div');
+  body.innerHTML = contactBoxHtml();
+  await Modal.open({ title: '📮 联系作者', body, showCancel: false, okText: '关闭', getValue: () => true });
+}
+
+function bindMe() {
+  $('#pfSave').onclick = () => {
+    Store.updateSettings({ profile: { name: $('#pfName').value.trim(), phone: $('#pfPhone').value.trim(), email: $('#pfEmail').value.trim() } });
+    toast('资料已保存');
+  };
+  renderLicenseBox();
+}
+
+async function renderLicenseBox() {
+  const box = $('#licBody');
+  if (!box) return;
+  const st = await License.status();
+  if (!st.required) {
+    box.innerHTML = `<div class="lic-ok">✅ 本设备免授权，可直接使用<div class="sub" style="margin:4px 0 0">网页版 / iPhone 加到主屏幕不需要授权码。</div></div>`;
+    return;
+  }
+  if (st.ok) {
+    box.innerHTML = `
+      <div class="lic-ok">✅ 已授权，感谢支持！</div>
+      <label class="fld">本机机器码</label>
+      <div class="path-box">${st.mc}</div>
+      <button class="btn ghost small" id="licCopyMc" style="margin-top:8px">复制机器码</button>`;
+    $('#licCopyMc').onclick = () => copyText(st.mc);
+    return;
+  }
+  box.innerHTML = `
+    <div class="lic-warn">⚠️ 未授权。把下面「机器码」发给作者，换取「授权码」后粘贴激活（一次授权，终身使用）。</div>
+    <label class="fld">本机机器码（发给作者）</label>
+    <div class="path-box" id="licMc">${st.mc}</div>
+    <button class="btn ghost small" id="licCopyMc" style="margin:8px 0">复制机器码</button>
+    <label class="fld">粘贴授权码</label>
+    <textarea id="licInput" placeholder="把作者发来的授权码整段粘贴到这里" style="min-height:70px"></textarea>
+    <button class="btn block" id="licActivate">激活</button>`;
+  $('#licCopyMc').onclick = () => copyText(st.mc);
+  $('#licActivate').onclick = async () => {
+    const code = $('#licInput').value.trim();
+    if (!code) { toast('请先粘贴授权码'); return; }
+    const ok = await License.activate(code);
+    if (ok) { toast('激活成功 🎉'); render(); }
+    else await Modal.alert('激活失败', '授权码和本机机器码不匹配，请确认：\n1）机器码是否复制完整\n2）授权码是否为这台设备生成的\n3）授权码是否整段粘贴。');
+  };
+}
+
+function copyText(t) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(() => toast('已复制')).catch(() => toast('复制失败，请手动选中'));
+  } else {
+    const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('已复制'); } catch (e) { toast('复制失败，请手动选中'); }
+    ta.remove();
+  }
 }
 
 /* 跳转到数据分析的某个子页（供各处「查看明细」用） */
@@ -240,7 +351,7 @@ async function openLedgerPicker() {
         ${ledgers.map(l => row(l.id, l.icon || '📒', l.name, active === l.id)).join('')}
       </div>
       <button class="btn ghost block" id="lpAdd">＋ 新建账本</button>
-      <div class="sub" style="margin:8px 0 0">在「设置 → 常规」里可以改名、换图标或删除账本。</div>`;
+      <div class="sub" style="margin:8px 0 0">在「个人中心 → 常规」里可以改名、换图标或删除账本。</div>`;
     body.querySelectorAll('.ledger-row').forEach(b => b.onclick = () => {
       Store.setActiveLedger(b.dataset.id);
       body._done(true);
@@ -300,6 +411,486 @@ function acctPickerRow() {
 }
 
 /* ============================================================
+   财务管理页
+============================================================ */
+/* 存钱计划的节奏提示：要按时完成每月得存多少 / 按当前速度什么时候能到 */
+/* 存钱计划的节奏提示：按剩余时间选合适的单位，别对着 14 天的目标报「每月要存 4000」 */
+function goalPaceHint(g, p) {
+  if (p.done) return '';
+  const parts = [];
+  if (g.targetDate) {
+    const days = Math.ceil((new Date(g.targetDate + 'T00:00:00') - new Date(todayStr() + 'T00:00:00')) / 86400000);
+    if (days > 0) {
+      // 剩不到两个月还报「每月要存 X」会算出比目标本身还大的数，很荒唐 —— 按天/周说
+      let need;
+      if (days <= 14) need = `每天还需存 <b style="color:var(--income)">${fmtM(p.remain / days)}</b>`;
+      else if (days <= 60) need = `每周还需存 <b style="color:var(--income)">${fmtM(p.remain / (days / 7))}</b>`;
+      else need = `每月还需存 <b style="color:var(--income)">${fmtM(p.remain / (days / 30.4))}</b>`;
+      parts.push(`要按时完成，${need}（还剩 ${days} 天）`);
+    } else parts.push('<b style="color:var(--danger)">⚠️ 已过目标日期</b>');
+  }
+  const elapsed = Math.max(1, Math.ceil((new Date(todayStr() + 'T00:00:00') - new Date((g.startDate || todayStr()) + 'T00:00:00')) / 86400000));
+  if (p.saved > 0 && elapsed >= 7) {
+    const perDay = p.saved / elapsed;
+    const need = Math.ceil(p.remain / perDay);
+    if (isFinite(need) && need > 0 && need < 3650) parts.push(`按目前速度约 <b>${need}</b> 天达成`);
+  }
+  return parts.length ? `<div class="sub" style="margin:3px 0 0">${parts.join('　|　')}</div>` : '';
+}
+
+/* ---------- 财务管理：期间导航 ---------- */
+function finRange() {
+  const a = S.finAnchor;
+  if (S.finPeriod === 'year') {
+    const y = a.slice(0, 4);
+    return { label: y + '年', months: Store.monthsOfYear(y), year: y, ym: null };
+  }
+  const ym = a.slice(0, 7);
+  return { label: ym.replace('-', ' 年 ') + ' 月', months: [ym], year: ym.slice(0, 4), ym };
+}
+function finShift(n) {
+  if (S.finPeriod === 'year') S.finAnchor = (+S.finAnchor.slice(0, 4) + n) + S.finAnchor.slice(4);
+  else S.finAnchor = shiftYM(S.finAnchor.slice(0, 7), n) + '-15';
+}
+
+function viewFinance() {
+  const subs = [['budget', '🎯 预算'], ['goals', '🐷 存钱计划'], ['accounts', '💼 账户']];
+  const bar = `<div class="subtab-bar">${subs.map(([k, n]) =>
+    `<button class="subtab ${S.finSub === k ? 'on' : ''}" data-fsub="${k}">${n}</button>`).join('')}</div>`;
+  const inner = S.finSub === 'goals' ? viewFinGoals() : S.finSub === 'accounts' ? viewAccounts() : viewFinBudget();
+  return bar + inner;
+}
+function bindFinance() {
+  $$('.subtab[data-fsub]').forEach(b => b.onclick = () => { S.finSub = b.dataset.fsub; render(); });
+  if (S.finSub === 'goals') bindFinGoals();
+  else if (S.finSub === 'accounts') bindAccounts();
+  else bindFinBudget();
+}
+
+/* ============================================================
+   财务管理 · 子页1：预算与统计
+============================================================ */
+function viewFinBudget() {
+  const R = finRange();
+  const isMonth = S.finPeriod === 'month';
+  const ps = Store.periodStats(R.months);
+  const totalBudget = Store.getTotalBudget();
+  const thisMonth = todayStr().slice(0, 7);
+
+  /* ---- 期间导航 ---- */
+  const nav = `
+  <div class="pill-group">
+    <button class="pill ${isMonth ? 'active' : ''}" data-fp="month">按月</button>
+    <button class="pill ${!isMonth ? 'active' : ''}" data-fp="year">按年</button>
+    <button class="pill" data-fp="today" style="margin-left:auto">回到当前</button>
+  </div>
+  <div class="period-nav">
+    <button class="pn-btn" id="finPrev">‹</button>
+    <button class="pn-label" id="finPick">${R.label} <span style="font-size:.72rem;opacity:.55">▾</span></button>
+    <button class="pn-btn" id="finNext">›</button>
+  </div>`;
+
+  if (!R.months.length) {
+    return nav + '<div class="card"><div class="empty"><div class="big">📭</div>这个时段还没有记账</div></div>';
+  }
+
+  /* ---- 收支总览（月/年通用；年视图给月均和中位数）---- */
+  const overview = isMonth ? (() => {
+    const ym = R.ym;
+    const spent = ps.exp[0] || 0, income = ps.inc[0] || 0;
+    const rate = income > 0 ? Math.round((income - spent) / income * 100) : 0;
+    // 只有看「当月」时算日均预测才有意义；看历史月份就直接给实际值
+    const isCur = ym === thisMonth;
+    const dim = new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
+    const day = isCur ? +todayStr().slice(8, 10) : dim;
+    const daysLeft = Math.max(0, dim - day);
+    const projected = day > 0 ? Math.round(spent / day * dim * 100) / 100 : spent;
+    return { spent, income, rate, dim, day, daysLeft, projected, isCur };
+  })() : null;
+
+  /* ---- 预算卡 ---- */
+  let budgetCard = '';
+  if (isMonth) {
+    const o = overview;
+    const over = totalBudget > 0 && o.spent > totalBudget;
+    const pct = totalBudget > 0 ? Math.min(100, o.spent / totalBudget * 100) : 0;
+    const projOver = totalBudget > 0 && o.projected > totalBudget;
+    budgetCard = `
+    <div class="card">
+      <h3>🎯 ${R.label} 总预算</h3>
+      ${totalBudget > 0 ? `
+        <div class="budget-big">
+          <div><span class="bb-spent ${over ? 'over' : ''}">${fmtM(o.spent)}</span> <span class="bb-of">/ ${fmtM(totalBudget)}</span></div>
+          <div class="bb-remain">${over ? `已超支 ${fmtM(o.spent - totalBudget)}` : `还可花 ${fmtM(totalBudget - o.spent)}`}</div>
+        </div>
+        <div class="bar-bg" style="height:10px;margin:10px 0 6px"><div class="bar-fg" style="width:${pct}%;background:${over ? 'var(--danger)' : 'var(--brand)'}"></div></div>
+        ${o.isCur && !over && o.daysLeft > 0 ? `<div class="tip-strong">本月还剩 <b>${o.daysLeft}</b> 天，接下来每天可花 <b style="color:var(--brand)">${fmtM((totalBudget - o.spent) / o.daysLeft)}</b> 才不超预算</div>` : ''}
+        ${o.isCur && over ? `<div class="tip-strong danger">已经超预算 ${fmtM(o.spent - totalBudget)}，剩下 ${o.daysLeft} 天悠着点</div>` : ''}
+      ` : '<div class="sub" style="margin:0">还没设总预算。设一个每月总额，下面就会告诉你每天还能花多少。</div>'}
+      ${o.isCur && o.day > 2 ? `<div class="sub" style="margin:8px 0 0">按目前日均（${fmtM(o.spent / o.day)}/天），预计月末花 <b style="color:${projOver ? 'var(--danger)' : 'var(--brand)'}">${fmtM(o.projected)}</b>${projOver ? '，<b style="color:var(--danger)">会超预算</b>' : totalBudget > 0 ? '，在预算内 👍' : ''}</div>` : ''}
+      <div class="row" style="margin-top:10px">
+        <input type="number" id="finTotalBudget" value="${totalBudget || ''}" placeholder="每月总预算" step="1">
+        <button class="btn small narrow" id="finSetTotal">保存</button>
+      </div>
+    </div>`;
+  }
+
+  /* ---- 速览：月视图给本月；年视图给月均/中位数 ---- */
+  const overviewCard = isMonth ? `
+    <div class="card">
+      <h3>💡 ${R.label} 速览</h3>
+      <div class="debt-strip">
+        <div class="debt-box ${overview.rate >= 0 ? 'good' : 'bad'}"><div class="d-label">储蓄率</div><div class="d-val" style="color:${overview.rate >= 20 ? 'var(--brand)' : overview.rate >= 0 ? 'var(--text)' : 'var(--danger)'}">${overview.rate}%</div></div>
+        <div class="debt-box"><div class="d-label">真实支出</div><div class="d-val amt-expense">${fmtM(overview.spent)}</div></div>
+        <div class="debt-box"><div class="d-label">真实收入</div><div class="d-val amt-income">${fmtM(overview.income)}</div></div>
+        <div class="debt-box ${ps.bal[0] >= 0 ? 'good' : 'bad'}"><div class="d-label">存下</div><div class="d-val" style="color:${ps.bal[0] >= 0 ? 'var(--brand)' : 'var(--danger)'}">${fmtM(ps.bal[0])}</div></div>
+      </div>
+      ${bigExpensesHtml(R.ym)}
+    </div>` : `
+    <div class="card">
+      <h3>💡 ${R.label} 收支水平（共 ${R.months.length} 个月）</h3>
+      <div class="sub">平均数容易被个别大额月份拉高，中位数更能代表「通常的一个月」。</div>
+      <div class="table-scroll">
+        <table class="simple"><thead><tr><th>口径</th><th>月平均</th><th>月中位数</th><th>全年合计</th></tr></thead>
+        <tbody>
+          <tr><td>支出</td><td class="amt-expense">${fmtM(ps.expAvg)}</td><td class="amt-expense">${fmtM(ps.expMed)}</td><td class="amt-expense">${fmtM(ps.exp.reduce((a, b) => a + b, 0))}</td></tr>
+          <tr><td>收入</td><td class="amt-income">${fmtM(ps.incAvg)}</td><td class="amt-income">${fmtM(ps.incMed)}</td><td class="amt-income">${fmtM(ps.inc.reduce((a, b) => a + b, 0))}</td></tr>
+          <tr><td>存下</td><td>${fmtM(ps.balAvg)}</td><td>${fmtM(ps.balMed)}</td><td>${fmtM(ps.bal.reduce((a, b) => a + b, 0))}</td></tr>
+        </tbody></table>
+      </div>
+      <div class="chart-wrap" id="finPeriodChart" style="margin-top:10px"></div>
+      <div class="legend">
+        <span class="lg"><span class="dot" style="background:#f0524c"></span>支出</span>
+        <span class="lg"><span class="dot" style="background:#2f7cf6"></span>收入</span>
+        <span class="lg"><span class="dot" style="background:#f5a524;border-radius:0;height:2px;width:14px"></span>支出中位数</span>
+      </div>
+    </div>`;
+
+  /* ---- 分类预算 vs 花销（额度使用对比）---- */
+  const expCats = Store.getCategories('expense');
+  const budRows = expCats.map(c => {
+    const b = Store.getBudget(c.id);
+    // 月视图比当月；年视图比「这一年月均」
+    const sp = isMonth ? Store.catSpent(R.ym, c.id) : Store.catStat(c.id, 'expense', R.months).avg;
+    return { c, b, sp };
+  }).filter(r => r.b > 0 || r.sp > 0).sort((a, b) => (b.sp || b.b) - (a.sp || a.b));
+
+  const catBudgetCard = `
+  <div class="card">
+    <h3>📊 分类额度使用
+      <span style="float:right"><button class="btn ghost small" id="finAuto">按历史生成额度</button></span>
+    </h3>
+    <div class="sub">额度就是「每月标准」，可手动改。${isMonth ? '下面比的是本月实际花销。' : '年视图下比的是这一年的<b>月均</b>花销。'}
+      点「按历史生成额度」可用中位数/平均数一键填好。</div>
+    ${budRows.length ? `
+      <div class="table-scroll" style="margin-bottom:6px">
+        <table class="simple"><thead><tr><th>分类</th><th>${isMonth ? '本月已花' : '月均花销'}</th><th>月额度</th><th>用了</th><th>差额</th></tr></thead>
+        <tbody>
+          ${budRows.map(r => {
+            const has = r.b > 0;
+            const usePct = has ? Math.round(r.sp / r.b * 100) : null;
+            const diff = has ? r.b - r.sp : null;
+            const over = has && r.sp > r.b;
+            return `<tr>
+              <td>${r.c.icon || ''} ${esc(r.c.name)}</td>
+              <td style="${over ? 'color:var(--danger);font-weight:700' : ''}">${fmtM(r.sp)}</td>
+              <td>${has ? fmtM(r.b) : '—'}</td>
+              <td style="${over ? 'color:var(--danger);font-weight:700' : ''}">${usePct === null ? '—' : usePct + '%'}</td>
+              <td style="color:${!has ? 'var(--text-3)' : over ? 'var(--danger)' : 'var(--brand)'};font-weight:600">${!has ? '—' : (over ? '超 ' + fmtM(-diff) : '省 ' + fmtM(diff))}</td>
+            </tr>`;
+          }).join('')}
+        </tbody></table>
+      </div>
+      ${budRows.map(r => `
+        <div class="fbud-row" data-cid="${r.c.id}">
+          <span class="fb-ico" style="background:color-mix(in srgb, ${r.c.color} 16%, transparent)">${r.c.icon || '🏷️'}</span>
+          <span class="fb-mid">
+            <span class="fb-name">${esc(r.c.name)} <span class="fb-num ${r.b > 0 && r.sp > r.b ? 'over' : ''}">${fmtM(r.sp)}${r.b > 0 ? ` / ${fmtM(r.b)}` : ''}</span></span>
+            ${r.b > 0 ? `<div class="bar-bg" style="margin-top:4px"><div class="bar-fg" style="width:${Math.min(100, r.sp / r.b * 100)}%;background:${r.sp > r.b ? 'var(--danger)' : r.c.color}"></div></div>` : '<div class="fb-nobudget">未设额度</div>'}
+          </span>
+          <input class="fb-input" type="number" value="${r.b || ''}" placeholder="额度" step="1">
+        </div>`).join('')}
+    ` : '<div class="empty" style="padding:20px 0">这个时段没有支出记录</div>'}
+  </div>`;
+
+  /* ---- 分类中位数/平均数 + 图 ---- */
+  const statCats = expCats.map(c => ({ c, st: Store.catStat(c.id, 'expense', R.months) }))
+    .filter(x => x.st.active > 0).sort((a, b) => b.st.avg - a.st.avg);
+  const statCard = `
+  <div class="card">
+    <div class="chart-tools">
+      <b style="font-size:.95rem">📐 各分类每月中位数 / 平均数</b>
+      <span class="spacer"></span>
+      <span class="seg-mini">
+        <button class="${S.finChart === 'bar' ? 'on' : ''}" data-fc="bar">柱状</button>
+        <button class="${S.finChart === 'line' ? 'on' : ''}" data-fc="line">折线</button>
+      </span>
+    </div>
+    <div class="sub" style="margin-top:0">统计范围：${R.months.length} 个月（${R.months[0]} ~ ${R.months[R.months.length - 1]}）。${isMonth ? '想看多个月的规律，切到「按年」。' : ''}</div>
+    ${statCats.length ? `
+      <div class="chart-wrap" id="finCatChart"></div>
+      <div class="legend">
+        <span class="lg"><span class="dot" style="background:#5b8def"></span>月平均</span>
+        <span class="lg"><span class="dot" style="background:#f5a524"></span>月中位数</span>
+      </div>
+      <div class="table-scroll" style="margin-top:10px">
+        <table class="simple"><thead><tr><th>分类</th><th>月平均</th><th>月中位数</th><th>最高月</th><th>有花销月数</th></tr></thead>
+        <tbody>
+          ${statCats.map(({ c, st }) => `<tr>
+            <td>${c.icon || ''} ${esc(c.name)}</td>
+            <td>${fmtM(st.avg)}</td><td>${fmtM(st.median)}</td><td>${fmtM(st.max)}</td>
+            <td>${st.active}/${st.months}</td></tr>`).join('')}
+        </tbody></table>
+      </div>` : '<div class="empty" style="padding:20px 0">这个时段没有支出记录</div>'}
+  </div>`;
+
+  return nav + budgetCard + overviewCard + catBudgetCard + statCard;
+}
+
+/* ---------- 账本管理卡（放在存钱计划页下方）---------- */
+function ledgerManageCard() {
+  const ledgers = Store.getLedgers();
+  return `
+  <div class="card">
+    <h3>📚 账本管理</h3>
+    <div class="sub">多本账分开记（生活、生意、旅行…）。顶部标签可切换当前账本；选「全部」时所有账目一起看。</div>
+    <div class="ledger-manage">
+      ${ledgers.map(l => `
+        <div class="lm-row" data-id="${l.id}">
+          <span class="lm-ico">${l.icon || '📒'}</span>
+          <span class="lm-name">${esc(l.name)}${l.builtin ? ' <i style="font-size:.7rem;color:var(--text-3)">默认</i>' : ''}</span>
+          <span class="lm-cnt">${Store.getEntries().filter(e => Store.ledgerOf(e) === l.id).length} 笔</span>
+          <button class="lm-edit" title="改名/图标">✏️</button>
+          ${l.builtin ? '' : '<button class="lm-del" title="删除">🗑</button>'}
+        </div>`).join('')}
+    </div>
+    <button class="btn ghost block" id="lmAdd">＋ 新建账本</button>
+  </div>`;
+}
+function bindLedgerManage() {
+  const lmAdd = $('#lmAdd');
+  if (lmAdd) lmAdd.onclick = async () => {
+    const name = await Modal.prompt('新建账本', { placeholder: '例：生意账、旅行账、家庭账' });
+    if (name) { Store.addLedger(name); toast('账本已创建'); render(); }
+  };
+  $$('.lm-row').forEach(row => {
+    const id = row.dataset.id;
+    const editBtn = row.querySelector('.lm-edit');
+    if (editBtn) editBtn.onclick = async () => {
+      const l = Store.getLedger(id);
+      const res = await Modal.form('编辑账本', [
+        { key: 'name', label: '账本名称', value: l.name },
+        { key: 'icon', label: '图标（emoji）', value: l.icon || '📒', hint: '可从手机表情里挑一个，例如 💼 ✈️ 🏠 🐱' },
+      ], { okText: '保存' });
+      if (res && res.name.trim()) { Store.updateLedger(id, { name: res.name.trim(), icon: res.icon.trim() || '📒' }); render(); }
+    };
+    const delBtn = row.querySelector('.lm-del');
+    if (delBtn) delBtn.onclick = async () => {
+      const l = Store.getLedger(id);
+      const cnt = Store.getEntries().filter(e => Store.ledgerOf(e) === id).length;
+      if (await Modal.confirm('删除账本', { text: `删除「${esc(l.name)}」？${cnt ? `它的 ${cnt} 笔记录会移到「日常账本」。` : ''}`, danger: true, okText: '删除' })) {
+        Store.removeLedger(id); toast('已删除'); render();
+      }
+    };
+  });
+}
+
+/* 本月最大几笔支出 */
+function bigExpensesHtml(ym) {
+  const bigs = Store.inMonth(ym).filter(e => e.type === 'expense' && !Store.debtKindOf(e))
+    .sort((a, b) => b.amount - a.amount).slice(0, 5);
+  if (!bigs.length) return '';
+  return `<label class="fld">最大的 ${bigs.length} 笔支出（钱花哪了）</label>` + bigs.map(e => {
+    const c = e.catId ? Store.getCat(e.catId) : null;
+    return `<div class="entry" style="border-bottom:1px solid var(--line)">
+      <span class="e-ico chip" style="background:color-mix(in srgb, ${c ? c.color : '#999'} 15%, transparent)">${c ? c.icon : '❓'}</span>
+      <span class="e-mid"><div class="e-cat">${e.date.slice(5)} ${esc(c ? c.name : '未知')}</div><div class="e-note">${esc(e.note) || ''}</div></span>
+      <span class="e-amt amt-expense">-${fmtM(e.amount)}</span></div>`;
+  }).join('');
+}
+
+function bindFinBudget() {
+  $$('.pill[data-fp]').forEach(b => b.onclick = () => {
+    if (b.dataset.fp === 'today') S.finAnchor = todayStr();
+    else S.finPeriod = b.dataset.fp;
+    render();
+  });
+  $('#finPrev').onclick = () => { finShift(-1); render(); };
+  $('#finNext').onclick = () => { finShift(1); render(); };
+  $('#finPick').onclick = async () => {
+    const d = await pickPeriod(S.finPeriod, S.finAnchor);
+    if (d) { S.finAnchor = d; render(); }
+  };
+  $$('[data-fc]').forEach(b => b.onclick = () => { S.finChart = b.dataset.fc; render(); });
+
+  const setTotal = $('#finSetTotal');
+  if (setTotal) setTotal.onclick = () => { Store.setTotalBudget(parseFloat($('#finTotalBudget').value) || 0); toast('总预算已更新'); render(); };
+
+  const auto = $('#finAuto');
+  if (auto) auto.onclick = async () => {
+    const basis = await Modal.choose('按历史生成每月额度', [
+      { value: 'median', label: '按每月中位数', hint: '更稳，抗个别大额月份（推荐）' },
+      { value: 'avg', label: '按每月平均数', hint: '含大额月份，数值偏高' },
+    ], { hint: '会覆盖现有的分类额度，生成后仍可手动微调' });
+    if (!basis) return;
+    const n = Store.autoBudgets(basis);
+    toast(`已按${basis === 'median' ? '中位数' : '平均数'}生成 ${n} 个分类额度`); render();
+  };
+  $$('.fbud-row').forEach(row => {
+    const inp = row.querySelector('.fb-input');
+    inp.onchange = () => { Store.setBudget(row.dataset.cid, parseFloat(inp.value) || 0); render(); };
+  });
+
+  /* ---- 图表 ---- */
+  const R = finRange();
+  if (!R.months.length) return;
+  const ps = Store.periodStats(R.months);
+
+  // 年视图：逐月收支柱 + 中位数参考线
+  const pc = $('#finPeriodChart');
+  if (pc) {
+    const labels = R.months.map(m => +m.slice(5) + '月');
+    pc.appendChild(Charts.barChart(labels, [
+      { name: '支出', color: '#f0524c', values: ps.exp },
+      { name: '收入', color: '#2f7cf6', values: ps.inc },
+      { name: '支出中位数', color: '#f5a524', values: ps.exp.map(() => ps.expMed) },
+    ], { height: 240 }));
+  }
+
+  // 分类平均 vs 中位数
+  const cc = $('#finCatChart');
+  if (cc) {
+    const expCats = Store.getCategories('expense');
+    const rows = expCats.map(c => ({ c, st: Store.catStat(c.id, 'expense', R.months) }))
+      .filter(x => x.st.active > 0).sort((a, b) => b.st.avg - a.st.avg).slice(0, 12);
+    if (rows.length) {
+      const labels = rows.map(r => r.c.name);
+      const series = [
+        { name: '月平均', color: '#5b8def', values: rows.map(r => r.st.avg) },
+        { name: '月中位数', color: '#f5a524', values: rows.map(r => r.st.median) },
+      ];
+      cc.appendChild(S.finChart === 'line'
+        ? Charts.lineChart(labels, series, { height: 250 })
+        : Charts.barChart(labels, series, { height: 250, width: Math.max(640, labels.length * 60 + 90) }));
+    }
+  }
+}
+
+/* ============================================================
+   财务管理 · 子页2：存钱计划（+ 账本管理）
+============================================================ */
+function viewFinGoals() {
+  const goal = Store.getMonthlyGoal();
+  const hist = Store.monthlyGoalHistory(12);
+  const streak = Store.goalStreak();
+  const thisMonth = todayStr().slice(0, 7);
+  const cur = hist.find(h => h.ym === thisMonth);
+  const met = hist.filter(h => h.met).length;
+  const rate = goal > 0 && hist.length ? Math.round(met / hist.length * 100) : 0;
+  const surplus = Store.budgetSurplus(thisMonth);
+
+  /* ---- 每月储蓄目标（第二条线：收入−支出）---- */
+  const monthlyCard = `
+  <div class="card">
+    <h3>📅 每月储蓄目标</h3>
+    <div class="sub">每月要存下多少（存下 = 真实收入 − 真实支出，借来的钱不算存下）。<br>
+      设好后，下面每个月自动打勾或警示。</div>
+    <div class="row">
+      <input type="number" id="mgInput" value="${goal || ''}" placeholder="每月想存多少" step="100">
+      <button class="btn small narrow" id="mgSave">保存</button>
+    </div>
+    ${goal > 0 ? `
+      <div class="ach-strip">
+        <div class="ach-box ${streak >= 3 ? 'hot' : ''}">
+          <div class="ach-n">${streak}</div><div class="ach-l">连续达成（月）${streak >= 3 ? ' 🔥' : ''}</div>
+        </div>
+        <div class="ach-box"><div class="ach-n">${met}/${hist.length}</div><div class="ach-l">达成月数</div></div>
+        <div class="ach-box ${rate >= 60 ? 'good' : ''}"><div class="ach-n">${rate}%</div><div class="ach-l">达成率</div></div>
+      </div>
+      ${cur ? (cur.met
+        ? `<div class="ach-banner done">🎉 本月已达成！存下 ${fmtM(cur.saved)}，超出目标 ${fmtM(cur.saved - goal)}</div>`
+        : `<div class="ach-banner warn">⚠️ 本月还差 <b>${fmtM(cur.gap)}</b> 才够目标（目前存下 ${fmtM(cur.saved)}）</div>`) : ''}
+      <label class="fld">最近 ${hist.length} 个月</label>
+      <div class="month-grid">
+        ${hist.map(h => `
+          <div class="mg-cell ${h.met ? 'met' : 'miss'}" title="${h.ym} 存下 ${fmtM(h.saved)} / 目标 ${fmtM(goal)}">
+            <div class="mg-ym">${h.ym.slice(2).replace('-', '/')}</div>
+            <div class="mg-ico">${h.met ? '✅' : '❌'}</div>
+            <div class="mg-v">${Charts.fmt(h.saved)}</div>
+          </div>`).join('')}
+      </div>
+    ` : '<div class="sub" style="margin:10px 0 0">还没设目标。设一个，就能看到每月有没有存到钱。</div>'}
+  </div>`;
+
+  /* ---- 预算执行 → 省下多少（第一条线：靠守额度存钱）---- */
+  const budgetCard = `
+  <div class="card">
+    <h3>🧮 本月靠守额度存下多少</h3>
+    <div class="sub">把「分类额度 − 实际花销」的结余加起来，就是你靠控制花销多存下的钱。</div>
+    <div class="debt-strip">
+      <div class="debt-box good"><div class="d-label">省下（未超额度的分类）</div><div class="d-val" style="color:var(--brand)">${fmtM(surplus.saved)}</div></div>
+      <div class="debt-box ${surplus.over > 0 ? 'bad' : ''}"><div class="d-label">超支（超额度的分类）</div><div class="d-val" style="color:${surplus.over > 0 ? 'var(--danger)' : 'var(--text-3)'}">${fmtM(surplus.over)}</div></div>
+      <div class="debt-box ${surplus.saved - surplus.over >= 0 ? 'good' : 'bad'}"><div class="d-label">净效果</div><div class="d-val" style="color:${surplus.saved - surplus.over >= 0 ? 'var(--brand)' : 'var(--danger)'}">${surplus.saved - surplus.over >= 0 ? '+' : ''}${fmtM(surplus.saved - surplus.over)}</div></div>
+    </div>
+    ${surplus.saved === 0 && surplus.over === 0 ? '<div class="sub" style="margin:8px 0 0">还没设分类额度 —— 去「预算」子页设一下，这里就有数了。</div>' : ''}
+    <button class="btn ghost block" id="mgGoBudget">去设置分类额度 →</button>
+  </div>`;
+
+  /* ---- 目标型存钱计划 ---- */
+  const goals = Store.getSavingsGoals();
+  const goalCard = `
+  <div class="card">
+    <h3>🐷 攒钱目标</h3>
+    <div class="sub">定个目标金额，从建计划那天起，积蓄涨了多少就算存了多少。</div>
+    ${goals.length ? goals.map(g => {
+      const p = Store.goalProgress(g);
+      return `
+      <div class="goal-row ${p.done ? 'done' : ''}" data-id="${g.id}">
+        <div class="goal-top">
+          <b>${p.done ? '🏆 ' : ''}${esc(g.name)}</b>
+          <span>${p.done ? '已完成' : `已存 ${fmtM(p.saved)} / ${fmtM(g.target)}`}</span>
+          <button class="goal-del" title="删除">🗑</button>
+        </div>
+        <div class="bar-bg" style="height:9px;margin:6px 0 4px"><div class="bar-fg" style="width:${p.pct}%;background:${p.done ? 'var(--brand)' : 'var(--income)'}"></div></div>
+        ${p.done
+          ? `<div class="ach-banner done" style="margin:6px 0 0">🎉 目标达成！存够 ${fmtM(g.target)}，可以定个新的了</div>`
+          : `<div class="sub" style="margin:0">还差 ${fmtM(p.remain)}${g.targetDate ? ' · 目标日 ' + g.targetDate : ''}</div>${goalPaceHint(g, p)}`}
+      </div>`;
+    }).join('') : '<div class="empty" style="padding:16px 0">还没有攒钱目标</div>'}
+    <button class="btn ghost block" id="finAddGoal">＋ 新建攒钱目标</button>
+  </div>`;
+
+  return monthlyCard + budgetCard + goalCard + ledgerManageCard();
+}
+
+function bindFinGoals() {
+  $('#mgSave').onclick = () => { Store.setMonthlyGoal(parseFloat($('#mgInput').value) || 0); toast('每月储蓄目标已更新'); render(); };
+  const gb = $('#mgGoBudget');
+  if (gb) gb.onclick = () => { S.finSub = 'budget'; render(); };
+  const addGoal = $('#finAddGoal');
+  if (addGoal) addGoal.onclick = async () => {
+    const res = await Modal.form('新建攒钱目标', [
+      { key: 'name', label: '目标名称', value: '', placeholder: '例：攒够 5 万应急金 / 换手机' },
+      { key: 'target', label: '目标金额', type: 'number', value: '' },
+      { key: 'targetDate', label: '目标日期（可选）', type: 'date', value: '' },
+    ], { okText: '创建' });
+    if (!res) return;
+    const target = parseFloat(res.target) || 0;
+    if (!res.name.trim() || target <= 0) { toast('请填名称和目标金额'); return; }
+    Store.addSavingsGoal({ name: res.name.trim(), target, targetDate: res.targetDate });
+    toast('计划已创建，从现在开始算进度'); render();
+  };
+  $$('.goal-del').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const id = b.closest('.goal-row').dataset.id;
+    if (await Modal.confirm('删除目标', { text: '确定删除这个攒钱目标？', danger: true, okText: '删除' })) {
+      Store.removeSavingsGoal(id); render();
+    }
+  });
+  bindLedgerManage();
+}
+
+/* ============================================================
    账户页
 ============================================================ */
 function kindName(k) { const x = Store.getAccountKinds().find(z => z.kind === k); return x ? x.name : '其他'; }
@@ -309,6 +900,8 @@ function viewAccounts() {
   const snap = Store.accountsSnapshot();
   const dl = debtLabel(as.debt);
   const overpaid = netRepaid(as.debt);
+  const dtAll = Store.debtTotals(Store.getEntries());   // 全部记录的借入/还款/借出/收回累计
+  const curDebt = Math.max(as.debt, 0);
   return `
   <div class="hero">
     <div class="h-label">净资产 = 账户总余额 ＋ 别人欠我 − 我欠别人</div>
@@ -341,6 +934,25 @@ function viewAccounts() {
       <button class="btn" id="acAdd">＋ 新建账户</button>
       <button class="btn ghost" id="acTransfer">🔄 转账</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h3>🏦 负债明细</h3>
+    <div class="sub">当前欠款 = 期初负债 ＋ 累计借入 − 累计还款（不会低于 0）</div>
+    <div class="debt-ledger">
+      <div class="dl-row"><span>期初负债（记账前就欠的）</span><b>${fmtM(Store.getSettings().openingDebt || 0)}</b></div>
+      <div class="dl-row"><span>＋ 累计借入</span><b class="amt-expense">${fmtM(dtAll.borrow)}</b></div>
+      <div class="dl-row"><span>− 累计还款</span><b class="amt-income">${fmtM(dtAll.repay)}</b></div>
+      <div class="dl-row total"><span>＝ 当前欠款</span><b style="color:${curDebt > 0 ? 'var(--danger)' : 'var(--text-3)'}">${fmtM(curDebt)}</b></div>
+      ${overpaid > 0 ? `<div class="sub" style="margin:6px 0 0">（还款比借入多 ${fmtM(overpaid)}，按 0 计；若记账前有欠款，下面填期初负债）</div>` : ''}
+    </div>
+    ${dtAll.lend || dtAll.collect || as.credit ? `
+    <div class="debt-ledger" style="margin-top:10px">
+      <div class="dl-row"><span>期初债权（别人欠我）</span><b>${fmtM(Store.getSettings().openingCredit || 0)}</b></div>
+      <div class="dl-row"><span>＋ 累计借出</span><b>${fmtM(dtAll.lend)}</b></div>
+      <div class="dl-row"><span>− 累计收回</span><b>${fmtM(dtAll.collect)}</b></div>
+      <div class="dl-row total"><span>＝ 别人还欠我</span><b>${fmtM(Math.max(as.credit, 0))}</b></div>
+    </div>` : ''}
   </div>
 
   <div class="card">
@@ -686,6 +1298,8 @@ function viewDetail() {
   const [dy, dm] = S.detailMonth.split('-').map(Number);
   const monthEnd = `${S.detailMonth}-${pad2(new Date(dy, dm, 0).getDate())}`;
   const bal = Store.balanceAsOf(monthEnd);
+  // 月初负债 = 上月末负债（顺延）
+  const openBal = Store.balanceAsOf(dateAdd(`${S.detailMonth}-01`, -1));
   const unknown = all.filter(e => !e.catId).length;
   let list = all;
   if (S.detailFilter === 'unknown') list = list.filter(e => !e.catId);
@@ -721,20 +1335,24 @@ function viewDetail() {
     <div class="summary-box"><div class="s-label">本月支出</div><div class="s-val amt-expense">${fmtM(t.expense)}</div></div>
     <div class="summary-box"><div class="s-label">本月收入</div><div class="s-val amt-income">${fmtM(t.income)}</div></div>
     <div class="summary-box"><div class="s-label">结余</div><div class="s-val" style="color:${t.balance >= 0 ? 'var(--brand)' : 'var(--danger)'}">${t.balance >= 0 ? '+' : ''}${fmtM(t.balance)}</div></div>
-    <div class="summary-box" title="${debtLabel(bal.debt).tip}"><div class="s-label">月末负债</div><div class="s-val" style="color:${debtLabel(bal.debt).color}">${debtLabel(bal.debt).text}</div></div>
+    <div class="summary-box"><div class="s-label">真实结余</div><div class="s-val" style="color:${t.balanceReal >= 0 ? 'var(--brand)' : 'var(--danger)'}">${t.balanceReal >= 0 ? '+' : ''}${fmtM(t.balanceReal)}</div></div>
   </div>
   <div class="debt-strip">
-    <div class="debt-box ${t.balanceReal >= 0 ? 'good' : 'bad'}">
-      <div class="d-label">真实结余（不含借还款）</div>
-      <div class="d-val" style="color:${t.balanceReal >= 0 ? 'var(--brand)' : 'var(--danger)'}">${t.balanceReal >= 0 ? '+' : ''}${fmtM(t.balanceReal)}</div>
+    <div class="debt-box" title="${debtLabel(openBal.debt).tip}">
+      <div class="d-label">月初负债（上月顺延）</div>
+      <div class="d-val" style="color:${debtLabel(openBal.debt).color}">${debtLabel(openBal.debt).text}</div>
     </div>
     <div class="debt-box ${dt.debtChange > 0 ? 'warn' : ''}">
       <div class="d-label">本月借入 / 还款</div>
       <div class="d-val" style="font-size:.9rem">${fmtM(dt.borrow)} / ${fmtM(dt.repay)}</div>
     </div>
+    <div class="debt-box ${bal.debt > 0 ? 'bad' : ''}" title="${debtLabel(bal.debt).tip}">
+      <div class="d-label">月末负债</div>
+      <div class="d-val" style="color:${debtLabel(bal.debt).color}">${debtLabel(bal.debt).text}</div>
+    </div>
     <div class="debt-box ${bal.credit > 0 ? 'warn' : ''}">
-      <div class="d-label">别人欠我（债权）</div>
-      <div class="d-val">${fmtM(bal.credit)}</div>
+      <div class="d-label">别人欠我</div>
+      <div class="d-val">${fmtM(Math.max(bal.credit, 0))}</div>
     </div>
   </div>
   <div class="pill-group">
@@ -833,8 +1451,9 @@ function viewStats() {
   const t = Store.totals(list);
   const dt = Store.debtTotals(list);
   const bal = Store.balanceAsOf(d2);
+  const openBal = Store.balanceAsOf(dateAdd(d1, -1));   // 期初负债 = 本期第一天前一天
   const rows = Store.catTotals(list, S.statsType);
-  const hasDebt = dt.borrow || dt.repay || dt.lend || dt.collect || bal.debt || bal.credit;
+  const hasDebt = dt.borrow || dt.repay || dt.lend || dt.collect || bal.debt || bal.credit || openBal.debt;
   return `
   <div class="pill-group">
     <button class="pill ${S.statsPeriod === 'day' ? 'active' : ''}" data-p="day">日</button>
@@ -854,6 +1473,11 @@ function viewStats() {
     <div class="summary-box"><div class="s-label">总支出</div><div class="s-val amt-expense">${fmtM(t.expense)}</div></div>
     <div class="summary-box"><div class="s-label">总收入</div><div class="s-val amt-income">${fmtM(t.income)}</div></div>
     <div class="summary-box"><div class="s-label">结余</div><div class="s-val" style="color:${t.balance >= 0 ? 'var(--brand)' : 'var(--danger)'}">${t.balance >= 0 ? '+' : ''}${fmtM(t.balance)}</div></div>
+  </div>
+  <div class="summary-strip">
+    <div class="summary-box" title="${debtLabel(openBal.debt).tip}"><div class="s-label">期初负债</div><div class="s-val" style="color:${debtLabel(openBal.debt).color}">${debtLabel(openBal.debt).text}</div></div>
+    <div class="summary-box"><div class="s-label">本期借入</div><div class="s-val" style="color:${dt.borrow > 0 ? 'var(--danger)' : 'var(--text-3)'}">${fmtM(dt.borrow)}</div></div>
+    <div class="summary-box"><div class="s-label">本期还款</div><div class="s-val" style="color:${dt.repay > 0 ? 'var(--brand)' : 'var(--text-3)'}">${fmtM(dt.repay)}</div></div>
     <div class="summary-box" title="${debtLabel(bal.debt).tip}"><div class="s-label">期末负债</div><div class="s-val" style="color:${debtLabel(bal.debt).color}">${debtLabel(bal.debt).text}</div></div>
   </div>
 
@@ -917,13 +1541,16 @@ function viewStats() {
   <div class="card">
     <h3>🏦 负债图谱</h3>
     <div class="debt-strip">
-      <div class="debt-box ${bal.debt > 0 ? 'bad' : 'good'}" title="${debtLabel(bal.debt).tip}">
-        <div class="d-label">期末负债余额</div><div class="d-val" style="color:${debtLabel(bal.debt).color}">${debtLabel(bal.debt).text}</div>
+      <div class="debt-box" title="${debtLabel(openBal.debt).tip}">
+        <div class="d-label">期初负债</div><div class="d-val" style="color:${debtLabel(openBal.debt).color}">${debtLabel(openBal.debt).text}</div>
       </div>
       <div class="debt-box"><div class="d-label">本期借入</div><div class="d-val" style="color:var(--danger)">${fmtM(dt.borrow)}</div></div>
       <div class="debt-box"><div class="d-label">本期还款</div><div class="d-val" style="color:var(--brand)">${fmtM(dt.repay)}</div></div>
-      <div class="debt-box ${bal.credit > 0 ? 'warn' : ''}"><div class="d-label">别人欠我</div><div class="d-val">${fmtM(bal.credit)}</div></div>
+      <div class="debt-box ${bal.debt > 0 ? 'bad' : 'good'}" title="${debtLabel(bal.debt).tip}">
+        <div class="d-label">期末负债</div><div class="d-val" style="color:${debtLabel(bal.debt).color}">${debtLabel(bal.debt).text}</div>
+      </div>
     </div>
+    <div class="sub" style="margin:-4px 0 8px">期末 = 期初 ＋ 本期借入 − 本期还款；期初随上一期顺延</div>
     <div class="chart-wrap" id="debtChart"></div>
     <div class="legend">
       <span class="lg"><span class="dot" style="background:#c88a4a"></span>借入</span>
@@ -1707,24 +2334,7 @@ function viewData() {
   const cur = st.theme;
   const as = Store.assetsAsOf('9999-12-31');
 
-  const ledgers = Store.getLedgers();
   return `
-  <div class="card">
-    <h3>📚 账本管理</h3>
-    <div class="sub">多本账分开记（生活、生意、旅行…）。顶部标签可切换当前账本；选「全部」时所有账目一起看。</div>
-    <div class="ledger-manage">
-      ${ledgers.map(l => `
-        <div class="lm-row" data-id="${l.id}">
-          <span class="lm-ico">${l.icon || '📒'}</span>
-          <span class="lm-name">${esc(l.name)}${l.builtin ? ' <i style="font-size:.7rem;color:var(--text-3)">默认</i>' : ''}</span>
-          <span class="lm-cnt">${Store.getEntries().filter(e => Store.ledgerOf(e) === l.id).length} 笔</span>
-          <button class="lm-edit" title="改名/图标">✏️</button>
-          ${l.builtin ? '' : '<button class="lm-del" title="删除">🗑</button>'}
-        </div>`).join('')}
-    </div>
-    <button class="btn ghost block" id="lmAdd">＋ 新建账本</button>
-  </div>
-
   <div class="card">
     <h3>💼 资产与账户</h3>
     <div class="sub">净资产、各账户余额、期初负债/债权都在「账户」标签页管理。</div>
@@ -2164,36 +2774,9 @@ function bindData() {
   /* 主题 */
   $$('[data-theme]').forEach(el => el.onclick = () => { Theme.set(el.dataset.theme); render(); });
 
-  /* 去账户页 */
+  /* 去账户页（已并入财务管理） */
   const ga = $('#goAccounts');
-  if (ga) ga.onclick = () => { S.tab = 'accounts'; render(); };
-
-  /* 账本管理 */
-  const lmAdd = $('#lmAdd');
-  if (lmAdd) lmAdd.onclick = async () => {
-    const name = await Modal.prompt('新建账本', { placeholder: '例：生意账、旅行账、家庭账' });
-    if (name) { Store.addLedger(name); toast('账本已创建'); render(); }
-  };
-  $$('.lm-row').forEach(row => {
-    const id = row.dataset.id;
-    const editBtn = row.querySelector('.lm-edit');
-    if (editBtn) editBtn.onclick = async () => {
-      const l = Store.getLedger(id);
-      const res = await Modal.form('编辑账本', [
-        { key: 'name', label: '账本名称', value: l.name },
-        { key: 'icon', label: '图标（emoji）', value: l.icon || '📒', hint: '可从手机表情里挑一个，例如 💼 ✈️ 🏠 🐱' },
-      ], { okText: '保存' });
-      if (res && res.name.trim()) { Store.updateLedger(id, { name: res.name.trim(), icon: res.icon.trim() || '📒' }); render(); }
-    };
-    const delBtn = row.querySelector('.lm-del');
-    if (delBtn) delBtn.onclick = async () => {
-      const l = Store.getLedger(id);
-      const cnt = Store.getEntries().filter(e => Store.ledgerOf(e) === id).length;
-      if (await Modal.confirm('删除账本', { text: `删除「${esc(l.name)}」？${cnt ? `它的 ${cnt} 笔记录会移到「日常账本」。` : ''}`, danger: true, okText: '删除' })) {
-        Store.removeLedger(id); toast('已删除'); render();
-      }
-    };
-  });
+  if (ga) ga.onclick = () => { S.tab = 'finance'; S.finSub = 'accounts'; render(); };
 
   /* 自动备份设置 */
   const refreshBackupUI = async () => {
@@ -2486,3 +3069,37 @@ window.onBackupDone = (res, time) => {
   if (S.tab === 'settings' && S.setSub === 'general') render();
 };
 Backup.start();
+
+/* ---------- 授权闸门（电脑版/安卓未授权时挡住主界面）---------- */
+async function licenseGate() {
+  const st = await License.status();
+  const existing = document.getElementById('gateMask');
+  if (!st.required || st.ok) { if (existing) existing.remove(); return; }
+  if (existing) return;   // 已经挡着了
+  const mask = document.createElement('div');
+  mask.id = 'gateMask';
+  mask.className = 'gate-mask';
+  mask.innerHTML = `
+    <div class="gate-card">
+      <h2>🔑 富财记 · 授权</h2>
+      <div class="sub">感谢使用！电脑版 / 安卓版需要授权码激活（一次授权，终身使用）。<br>
+        把下面「机器码」发给作者换取授权码，或在「个人中心 → 联系作者」扫码。</div>
+      <label class="fld">本机机器码（发给作者）</label>
+      <div class="path-box" id="gateMc">${st.mc}</div>
+      <button class="btn ghost small" id="gateCopy" style="margin:8px 0">复制机器码</button>
+      <label class="fld">粘贴授权码</label>
+      <textarea id="gateInput" placeholder="把作者发来的授权码整段粘贴到这里" style="min-height:70px"></textarea>
+      <button class="btn block" id="gateOk">激活并进入</button>
+      <button class="btn ghost block" id="gateContact">📮 联系作者获取授权码</button>
+    </div>`;
+  document.body.appendChild(mask);
+  $('#gateCopy').onclick = () => copyText(st.mc);
+  $('#gateContact').onclick = openContactModal;
+  $('#gateOk').onclick = async () => {
+    const code = $('#gateInput').value.trim();
+    if (!code) { toast('请先粘贴授权码'); return; }
+    if (await License.activate(code)) { mask.remove(); toast('激活成功 🎉'); render(); }
+    else await Modal.alert('激活失败', '授权码和本机机器码不匹配。请确认机器码复制完整、授权码为这台设备生成、且整段粘贴。');
+  };
+}
+licenseGate();

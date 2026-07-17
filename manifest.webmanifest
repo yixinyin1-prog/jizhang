@@ -1,7 +1,7 @@
 {
-  "name": "生活记账",
-  "short_name": "记账",
-  "description": "个人生活收支记账：智能归类、统计与历年对比",
+  "name": "富财记",
+  "short_name": "富财记",
+  "description": "富财记 · 记账 + 账户 + 财务管理，本地优先离线可用",
   "lang": "zh-CN",
   "start_url": "./index.html",
   "scope": "./",

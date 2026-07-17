@@ -17,7 +17,7 @@ const Backup = (() => {
     return 'web';
   }
   const canPickDir = () => platform() === 'electron' || (platform() === 'web' && typeof window.showDirectoryPicker === 'function');
-  const DIR_NAME = '生活记账备份';
+  const DIR_NAME = '富财记备份';
 
   /* 这个环境能不能「无人值守地把文件写进去」。
      iPhone/iPad 的 Safari 不支持文件系统授权 API，只能靠用户点一下导出，

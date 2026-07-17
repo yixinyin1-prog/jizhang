@@ -102,6 +102,12 @@ const Store = (() => {
     openingDate: '',   // 期初的基准日；留空表示「第一笔记录之前」
     activeLedger: 'all',   // 当前账本：'all'=全部一起，或某个账本 id
     lastAcct: '',          // 记账时上次用的账户，方便下次默认选中
+    profile: { name: '', phone: '', email: '' },   // 本地个人资料（不是真登录，只作标识）
+    totalBudget: 0,        // 每月总预算，0=不设
+    budgets: {},           // 分类月预算 {catId: 金额}
+    savingsGoals: [],      // 存钱计划 [{id,name,target,base,startDate,note}]
+    monthlyGoal: 0,        // 每月储蓄目标（收入−支出 要达到多少），0=不设
+    license: { code: '', activatedAt: 0 },   // 授权码（电脑/安卓需要）
     backup: {
       enabled: false, onExit: true, times: ['08:00', '20:00'], keep: 14,
       lastRun: {}, dirName: '',
@@ -401,10 +407,17 @@ const Store = (() => {
   }
   function removeAccount(id, moveTo) {
     if (id === DEFAULT_ACCT) return;              // 默认现金账户不可删
-    const target = moveTo || null;                // 默认改成「未指定」(归到默认账户)
     entries.forEach(e => {
-      if (e.acctId === id) e.acctId = target;
-      if (e.toAcctId === id) e.toAcctId = target;
+      if (e.type === 'transfer') {
+        /* 转账必须两端都指向真实账户。
+           以前这里置成 null，导致「转出方扣了钱、没人收钱」——钱凭空蒸发。
+           改指默认现金：两端都成现金时自然抵消为 0，账才平。 */
+        if (e.acctId === id) e.acctId = moveTo || DEFAULT_ACCT;
+        if (e.toAcctId === id) e.toAcctId = moveTo || DEFAULT_ACCT;
+      } else {
+        // 普通收支：置空即可，默认现金账户会吸收所有没绑账户的记录
+        if (e.acctId === id) e.acctId = moveTo || null;
+      }
     });
     accounts = accounts.filter(a => a.id !== id);
     persistAccounts(); persistEntries();
@@ -415,13 +428,15 @@ const Store = (() => {
     if (!acc) return 0;
     let bal = acc.opening || 0;
     const isDefault = id === DEFAULT_ACCT;
+    /* 转账的某一端指向了不存在的账户时（比如导入的老备份里账户已被删），
+       让默认现金账户兜住这一端，否则那笔钱会没有任何账户认领 —— 凭空消失。 */
+    const orphan = (aid) => !aid || !accounts.some(a => a.id === aid);
     for (const e of entries) {
       if (asOf && e.date > asOf) continue;
       const belongs = e.acctId === id || (isDefault && !e.acctId);
       if (e.type === 'transfer') {
-        // 转账两端都有明确账户（addTransfer 会补默认现金），照常加减
-        if (e.acctId === id) bal -= e.amount;                         // 转出
-        if (e.toAcctId === id) bal += e.amount;                       // 转入
+        if (e.acctId === id || (isDefault && orphan(e.acctId))) bal -= e.amount;      // 转出
+        if (e.toAcctId === id || (isDefault && orphan(e.toAcctId))) bal += e.amount;  // 转入
       } else if (belongs) {
         if (e.type === 'expense') bal -= e.amount; else bal += e.amount;
       }
@@ -567,6 +582,171 @@ const Store = (() => {
 
   function r2(x) { return Math.round(x * 100) / 100; }
 
+  /* ---------- 财务管理：预算、分类中位数/均值、存钱计划 ---------- */
+  /* 当前账本里有数据的连续月份 ['YYYY-MM',...]（首月到末月，中间空月也补上） */
+  function dataMonths() {
+    const list = scoped();
+    if (!list.length) return [];
+    let min = list[0].date.slice(0, 7), max = min;
+    for (const e of list) { const m = e.date.slice(0, 7); if (m < min) min = m; if (m > max) max = m; }
+    const out = [];
+    let [y, mo] = min.split('-').map(Number);
+    const [ey, em] = max.split('-').map(Number);
+    while (y < ey || (y === ey && mo <= em)) {
+      out.push(`${y}-${String(mo).padStart(2, '0')}`);
+      mo++; if (mo > 12) { mo = 1; y++; }
+    }
+    return out;
+  }
+  /* 某分类逐月金额（对齐 dataMonths，空月为0），type 默认 expense */
+  function catMonthlyAmounts(catId, type, months) {
+    const ms = months || dataMonths();
+    const key = catId || '__unknown__';
+    return ms.map(ym => {
+      let s = 0;
+      for (const e of inMonth(ym)) {
+        if ((e.type || '') !== (type || 'expense')) continue;
+        if ((e.catId || '__unknown__') === key) s += e.amount;
+      }
+      return r2(s);
+    });
+  }
+  function median(arr) {
+    if (!arr.length) return 0;
+    const a = [...arr].sort((x, y) => x - y);
+    const m = Math.floor(a.length / 2);
+    return r2(a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2);
+  }
+  function mean(arr) { return arr.length ? r2(arr.reduce((s, x) => s + x, 0) / arr.length) : 0; }
+  /* 某年里有数据的月份（用于按年看统计，避免把没记账的月份算进平均） */
+  function monthsOfYear(year) {
+    const all = new Set(dataMonths());
+    const out = [];
+    for (let m = 1; m <= 12; m++) {
+      const ym = `${year}-${String(m).padStart(2, '0')}`;
+      if (all.has(ym)) out.push(ym);
+    }
+    return out;
+  }
+  /* 一组月份的整体收支统计：逐月数组 + 平均/中位数（都用剔除借还款的真实口径） */
+  function periodStats(months) {
+    const ms = months || dataMonths();
+    const exp = [], inc = [], bal = [];
+    for (const ym of ms) {
+      const t = totals(inMonth(ym));
+      exp.push(t.expenseReal); inc.push(t.incomeReal); bal.push(t.balanceReal);
+    }
+    return {
+      months: ms, exp, inc, bal,
+      expAvg: mean(exp), expMed: median(exp),
+      incAvg: mean(inc), incMed: median(inc),
+      balAvg: mean(bal), balMed: median(bal),
+    };
+  }
+
+  /* 某分类的月度统计 {avg,median,max,min,months,active}（active=有花销的月数） */
+  function catStat(catId, type, months) {
+    const vals = catMonthlyAmounts(catId, type, months);
+    return {
+      avg: mean(vals), median: median(vals),
+      max: vals.length ? Math.max(...vals) : 0,
+      min: vals.length ? Math.min(...vals) : 0,
+      months: vals.length, active: vals.filter(v => v > 0).length, vals,
+    };
+  }
+  /* 本月某分类已花（真实支出，不含借还款）*/
+  function catSpent(ym, catId) {
+    let s = 0;
+    for (const e of inMonth(ym)) {
+      if (e.type !== 'expense' || debtKindOf(e)) continue;
+      if ((e.catId || '__unknown__') === (catId || '__unknown__')) s += e.amount;
+    }
+    return r2(s);
+  }
+  /* 本月总真实支出（不含借还款/转账）*/
+  const monthRealExpense = (ym) => totals(inMonth(ym)).expenseReal;
+
+  /* 预算 */
+  const getBudgets = () => settings.budgets || {};
+  const getBudget = (catId) => (settings.budgets || {})[catId] || 0;
+  function setBudget(catId, amount) {
+    const b = Object.assign({}, settings.budgets);
+    if (amount > 0) b[catId] = r2(amount); else delete b[catId];
+    updateSettings({ budgets: b });
+  }
+  const getTotalBudget = () => settings.totalBudget || 0;
+  function setTotalBudget(amount) { updateSettings({ totalBudget: r2(amount || 0) }); }
+  /* 按均值或中位数一键生成各分类预算 */
+  function autoBudgets(basis) {   // basis: 'avg' | 'median'
+    const b = {};
+    for (const c of getCategories('expense')) {
+      const st = catStat(c.id, 'expense');
+      const v = basis === 'median' ? st.median : st.avg;
+      if (v > 0) b[c.id] = r2(v);
+    }
+    updateSettings({ budgets: b });
+    return Object.keys(b).length;
+  }
+
+  /* 存钱计划 */
+  const getSavingsGoals = () => settings.savingsGoals || [];
+  function addSavingsGoal(g) {
+    const id = 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+    const goal = { id, name: g.name, target: r2(g.target), base: assetsAsOf(todayISO()).savings, startDate: g.startDate || todayISO(), targetDate: g.targetDate || '', note: g.note || '' };
+    updateSettings({ savingsGoals: [...getSavingsGoals(), goal] });
+    return goal;
+  }
+  function updateSavingsGoal(id, patch) {
+    updateSettings({ savingsGoals: getSavingsGoals().map(g => g.id === id ? Object.assign({}, g, patch) : g) });
+  }
+  function removeSavingsGoal(id) {
+    updateSettings({ savingsGoals: getSavingsGoals().filter(g => g.id !== id) });
+  }
+  function todayISO() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+
+  /* ---------- 每月储蓄目标：逐月达成情况 + 连续达成 ----------
+     某月实际存下 = 真实收入 − 真实支出（剔除借还款，因为借来的钱不算存下的） */
+  const getMonthlyGoal = () => settings.monthlyGoal || 0;
+  function setMonthlyGoal(v) { updateSettings({ monthlyGoal: r2(v || 0) }); }
+  /* 最近 n 个月的达成情况，最新的在前 */
+  function monthlyGoalHistory(n) {
+    const goal = getMonthlyGoal();
+    const ms = dataMonths().slice(-(n || 12)).reverse();
+    return ms.map(ym => {
+      const t = totals(inMonth(ym));
+      const saved = t.balanceReal;
+      return { ym, saved, goal, met: goal > 0 && saved >= goal, gap: r2(goal - saved) };
+    });
+  }
+  /* 连续达成月数（从最近有数据的月份往前数；当月还没过完也算，避免误判为断连） */
+  function goalStreak() {
+    const goal = getMonthlyGoal();
+    if (goal <= 0) return 0;
+    let n = 0;
+    for (const h of monthlyGoalHistory(60)) {
+      if (h.met) n++; else break;
+    }
+    return n;
+  }
+  /* 因为守住预算而多存下的钱：各分类 预算−实际 的正数部分之和 */
+  function budgetSurplus(ym) {
+    let saved = 0, over = 0;
+    for (const c of getCategories('expense')) {
+      const b = getBudget(c.id);
+      if (b <= 0) continue;
+      const sp = catSpent(ym, c.id);
+      if (sp <= b) saved += (b - sp); else over += (sp - b);
+    }
+    return { saved: r2(saved), over: r2(over) };
+  }
+  /* 存钱计划进度：已存 = 现在积蓄 − 建计划时的积蓄基线 */
+  function goalProgress(goal) {
+    const now = assetsAsOf(todayISO()).savings;
+    const saved = r2(now - (goal.base || 0));
+    const pct = goal.target > 0 ? Math.max(0, Math.min(100, saved / goal.target * 100)) : 0;
+    return { saved, pct, remain: r2(Math.max(0, goal.target - saved)), done: saved >= goal.target };
+  }
+
   /* ---------- 设置 ---------- */
   const getSettings = () => settings;
   function updateSettings(patch) {
@@ -632,6 +812,11 @@ const Store = (() => {
     // 账本
     getLedgers, getLedger, activeLedger, setActiveLedger, ledgerForNew, ledgerOf,
     addLedger, updateLedger, removeLedger, DEFAULT_LEDGER,
+    // 财务管理
+    dataMonths, monthsOfYear, periodStats, catMonthlyAmounts, catStat, median, mean, catSpent, monthRealExpense,
+    getBudgets, getBudget, setBudget, getTotalBudget, setTotalBudget, autoBudgets,
+    getSavingsGoals, addSavingsGoal, updateSavingsGoal, removeSavingsGoal, goalProgress,
+    getMonthlyGoal, setMonthlyGoal, monthlyGoalHistory, goalStreak, budgetSurplus,
     getSettings, updateSettings, getThemes, getTheme, isDirty, markClean,
     exportAll, importBackup, clearAll, resetCategoriesToDefault, storageSize,
   };
