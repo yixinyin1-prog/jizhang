@@ -179,8 +179,13 @@ const Store = (() => {
   const isDirty = () => dirty;
   const markClean = () => { dirty = false; };
 
-  const persistEntries = () => { dirty = true; saveJSON(K_ENTRIES, entries); };
-  const persistCats = () => { dirty = true; saveJSON(K_CATS, categories); };
+  /* 数据版本号：任何会改变 entries / 账本归属的操作都要 +1，
+     用来让下面的缓存失效。缓存是为了干掉 O(n²) 扫描（见 scoped / inMonth）。 */
+  let dataVer = 0;
+  const bumpVer = () => { dataVer++; };
+  const persistEntries = () => { dirty = true; bumpVer(); saveJSON(K_ENTRIES, entries); };
+  let catVer = 0;
+  const persistCats = () => { dirty = true; catVer++; saveJSON(K_CATS, categories); };
   const persistAccounts = () => { dirty = true; saveJSON(K_ACCOUNTS, accounts); };
   const persistLedgers = () => { dirty = true; saveJSON(K_LEDGERS, ledgers); };
 
@@ -189,7 +194,7 @@ const Store = (() => {
   const getLedgers = () => ledgers;
   const getLedger = (id) => ledgers.find(l => l.id === id) || null;
   const activeLedger = () => settings.activeLedger || 'all';
-  function setActiveLedger(id) { settings.activeLedger = id || 'all'; saveJSON(K_SETTINGS, settings); }
+  function setActiveLedger(id) { settings.activeLedger = id || 'all'; bumpVer(); saveJSON(K_SETTINGS, settings); }
   /* 新记录默认落到哪个账本：选了具体账本就用它，「全部」时落到默认账本 */
   const ledgerForNew = () => { const a = activeLedger(); return a === 'all' ? DEFAULT_LEDGER : a; };
   const ledgerOf = (e) => e.ledgerId || DEFAULT_LEDGER;
@@ -209,14 +214,46 @@ const Store = (() => {
   }
 
   /* 受当前账本过滤后的记录（记账、数据分析都走它）。转账不参与收支统计。 */
+  /* 当前账本下的条目。
+     以前每次调用都 filter 一遍全表，而 inMonth() 又对每个月各调一次，
+     catStat 一次渲染能叠出上千万次操作（年视图卡 30ms）。这里按 数据版本+账本 缓存。 */
+  let _scopedCache = null;   // {ver, ledger, arr}
   function scoped() {
     const a = activeLedger();
-    return a === 'all' ? entries : entries.filter(e => ledgerOf(e) === a);
+    if (_scopedCache && _scopedCache.ver === dataVer && _scopedCache.ledger === a) return _scopedCache.arr;
+    const arr = a === 'all' ? entries : entries.filter(e => ledgerOf(e) === a);
+    _scopedCache = { ver: dataVer, ledger: a, arr };
+    return arr;
+  }
+  /* 月份 → 条目 的索引，把 inMonth() 从「全表扫描」降成一次 Map 查表 */
+  let _monthIdx = null;      // {ver, ledger, map}
+  function monthIndex() {
+    const a = activeLedger();
+    if (_monthIdx && _monthIdx.ver === dataVer && _monthIdx.ledger === a) return _monthIdx.map;
+    const map = new Map();
+    for (const e of scoped()) {
+      const ym = e.date.slice(0, 7);
+      let arr = map.get(ym);
+      if (!arr) { arr = []; map.set(ym, arr); }
+      arr.push(e);
+    }
+    _monthIdx = { ver: dataVer, ledger: a, map };
+    return map;
   }
 
   /* ---------- 分类 ---------- */
   const getCategories = (type) => type ? categories.filter(c => c.type === type) : categories;
-  const getCat = (id) => categories.find(c => c.id === id) || null;
+  /* 用 Map 查分类，而不是每次 categories.find()。
+     debtKindOf() 会对每一条记录调一次 getCat，全表扫描时就是
+     O(条目×分类)（3860×26≈10万次），是所有统计页共同的隐藏开销。 */
+  let _catIdx = null;   // {ver, map}
+  function catIndex() {
+    if (_catIdx && _catIdx.ver === catVer) return _catIdx.map;
+    const map = new Map(categories.map(c => [c.id, c]));
+    _catIdx = { ver: catVer, map };
+    return map;
+  }
+  const getCat = (id) => catIndex().get(id) || null;
 
   function addCategory(type, name, extra) {
     const id = 'c' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
@@ -320,10 +357,33 @@ const Store = (() => {
   /* ---------- 查询与聚合 ----------
      下面这些走当前账本过滤；账户余额/净资产另有专门函数，始终全局。 */
   const getEntries = () => entries;                 // 全部记录（导出、账户余额用）
-  const byDate = (d) => scoped().filter(e => e.date === d);
-  const inRange = (d1, d2) => scoped().filter(e => e.date >= d1 && e.date <= d2);
-  const inMonth = (ym) => scoped().filter(e => e.date.startsWith(ym));   // 'YYYY-MM'
-  const inYear = (y) => scoped().filter(e => e.date.startsWith(y + '-'));
+  /* 按日期排好序的当前账本条目（缓存）。配合下面的二分查找，
+     把 inRange/byDate/inYear 从「全表扫描」降到 O(log n)。
+     统计页一次渲染要按天查三十几次，2 万条时全表扫描就是 60 万次操作。
+     JS 的 sort 是稳定排序，所以同一天内仍保持原有录入顺序。 */
+  /* 全部条目（不分账本）按日期排序，缓存复用。
+     负债前缀和、月末资产走势都要用；否则它们各自 sort 一次 2 万条。 */
+  let _sortedAll = null;     // {ver, arr}
+  function sortedAllByDate() {
+    if (_sortedAll && _sortedAll.ver === dataVer) return _sortedAll.arr;
+    const arr = entries.slice().sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+    _sortedAll = { ver: dataVer, arr };
+    return arr;
+  }
+  let _sortedCache = null;   // {ver, ledger, arr}
+  function sortedByDate() {
+    const a = activeLedger();
+    if (_sortedCache && _sortedCache.ver === dataVer && _sortedCache.ledger === a) return _sortedCache.arr;
+    const arr = scoped().slice().sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+    _sortedCache = { ver: dataVer, ledger: a, arr };
+    return arr;
+  }
+  const lowerBound = (arr, d) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m].date < d) lo = m + 1; else hi = m; } return lo; };
+  const upperBound = (arr, d) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m].date <= d) lo = m + 1; else hi = m; } return lo; };
+  const inRange = (d1, d2) => { const a = sortedByDate(); return a.slice(lowerBound(a, d1), upperBound(a, d2)); };
+  const byDate = (d) => inRange(d, d);
+  const inMonth = (ym) => monthIndex().get(ym) || [];                    // 'YYYY-MM'
+  const inYear = (y) => inRange(y + '-01-01', y + '-12-31');
 
   /* 该笔记录属于哪种往来款（借入/还款/借出/收回），普通消费返回 null */
   function debtKindOf(e) {
@@ -363,11 +423,41 @@ const Store = (() => {
     };
   }
   /* 截至某日（含）的负债余额与债权余额（含期初） */
+  /* 负债/债权的「累计前缀和」。
+     balanceAsOf 以前每次都 entries.filter 全表（统计页一次要调三十几次），
+     这里改成：按日期排序一次 + 前缀和，之后每次查询只要一次二分。
+     期初值不进前缀（读的时候再加），所以改期初负债不需要重建。
+     依赖 debtKindOf → 分类改了也要重建，故版本键同时含 catVer。 */
+  let _debtPrefix = null;
+  function debtPrefix() {
+    const key = dataVer + ':' + catVer;
+    if (_debtPrefix && _debtPrefix.key === key) return _debtPrefix;
+    const arr = sortedAllByDate();
+    const dates = new Array(arr.length);
+    const dch = new Array(arr.length + 1);
+    const cch = new Array(arr.length + 1);
+    dch[0] = 0; cch[0] = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const e = arr[i]; dates[i] = e.date;
+      let d = 0, c = 0;
+      switch (debtKindOf(e)) {
+        case 'borrow': d = e.amount; break;
+        case 'repay': d = -e.amount; break;
+        case 'lend': c = e.amount; break;
+        case 'collect': c = -e.amount; break;
+      }
+      dch[i + 1] = dch[i] + d; cch[i + 1] = cch[i] + c;
+    }
+    _debtPrefix = { key, dates, dch, cch };
+    return _debtPrefix;
+  }
   function balanceAsOf(dateStr) {
-    const t = debtTotals(entries.filter(e => e.date <= dateStr));
+    const p = debtPrefix();
+    let lo = 0, hi = p.dates.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (p.dates[m] <= dateStr) lo = m + 1; else hi = m; }
     return {
-      debt: r2((settings.openingDebt || 0) + t.debtChange),
-      credit: r2((settings.openingCredit || 0) + t.creditChange),
+      debt: r2((settings.openingDebt || 0) + p.dch[lo]),
+      credit: r2((settings.openingCredit || 0) + p.cch[lo]),
     };
   }
   /* 截至某日（含）的资产快照：积蓄、负债、债权、净资产
@@ -429,8 +519,11 @@ const Store = (() => {
     let bal = acc.opening || 0;
     const isDefault = id === DEFAULT_ACCT;
     /* 转账的某一端指向了不存在的账户时（比如导入的老备份里账户已被删），
-       让默认现金账户兜住这一端，否则那笔钱会没有任何账户认领 —— 凭空消失。 */
-    const orphan = (aid) => !aid || !accounts.some(a => a.id === aid);
+       让默认现金账户兜住这一端，否则那笔钱会没有任何账户认领 —— 凭空消失。
+       注意：这个 Set 必须建在循环外。以前写成循环内 accounts.some()，
+       变成 O(条目×账户)，12 个月的走势图要跑上百万次，年视图直接卡顿。 */
+    const idSet = new Set(accounts.map(a => a.id));
+    const orphan = (aid) => !aid || !idSet.has(aid);
     for (const e of entries) {
       if (asOf && e.date > asOf) continue;
       const belongs = e.acctId === id || (isDefault && !e.acctId);
@@ -443,9 +536,28 @@ const Store = (() => {
     }
     return r2(bal);
   }
-  /* 所有账户余额快照 + 总额 */
+  /* 所有账户余额快照 + 总额。
+     一趟扫完算出全部账户，而不是「每个账户各扫一遍全表」——
+     后者是 O(账户²×条目)，积蓄走势图要连算 12 个月，是年视图卡顿的主因。
+     语义与 accountBalance 保持完全一致（含孤儿转账兜底）。 */
   function accountsSnapshot(asOf) {
-    const rows = accounts.map(a => ({ ...a, balance: accountBalance(a.id, asOf) }));
+    const idSet = new Set(accounts.map(a => a.id));
+    const bal = new Map(accounts.map(a => [a.id, a.opening || 0]));
+    const add = (aid, v) => { if (bal.has(aid)) bal.set(aid, bal.get(aid) + v); };
+    for (const e of entries) {
+      if (asOf && e.date > asOf) continue;
+      if (e.type === 'transfer') {
+        // 转出端：认得的账户各归各，认不得的（含空）由默认现金兜底
+        add(idSet.has(e.acctId) ? e.acctId : DEFAULT_ACCT, -e.amount);
+        add(idSet.has(e.toAcctId) ? e.toAcctId : DEFAULT_ACCT, e.amount);
+      } else if (!e.acctId) {
+        add(DEFAULT_ACCT, e.type === 'expense' ? -e.amount : e.amount);
+      } else if (idSet.has(e.acctId)) {
+        add(e.acctId, e.type === 'expense' ? -e.amount : e.amount);
+      }
+      // 普通收支绑了已删账户 → 无人认领（与 accountBalance 的 belongs 判断一致）
+    }
+    const rows = accounts.map(a => ({ ...a, balance: r2(bal.get(a.id)) }));
     const total = r2(rows.reduce((s, r) => s + r.balance, 0));
     return { rows, total };
   }
@@ -460,12 +572,36 @@ const Store = (() => {
     entries.push(entry); persistEntries(); return entry;
   }
   /* 某年 12 个月的积蓄走势（月末快照） */
+  /* 12 个月末的资产快照。
+     以前是逐月调 assetsAsOf()，每次都从头筛一遍全表（12×3 遍扫描），
+     统计年视图一半的耗时都在这儿。改成按日期排序后**一趟累加**，
+     走到每个月末就记一个快照。结果与 assetsAsOf 完全等价。 */
   function monthlySavingsSeries(year) {
-    const res = [];
+    const ends = [];
     for (let m = 1; m <= 12; m++) {
-      const ym = year + '-' + String(m).padStart(2, '0');
       const last = new Date(+year, m, 0).getDate();
-      res.push(assetsAsOf(`${ym}-${String(last).padStart(2, '0')}`));
+      ends.push(`${year}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`);
+    }
+    const openBase = accounts.reduce((s, a) => s + (a.opening || 0), 0);
+    const sorted = sortedAllByDate();
+    const res = [];
+    let inc = 0, exp = 0, dch = 0, cch = 0, i = 0;
+    for (const end of ends) {
+      while (i < sorted.length && sorted[i].date <= end) {
+        const e = sorted[i++];
+        if (e.type === 'transfer') continue;      // 与 totals() 一致：转账不计收支
+        if (e.type === 'expense') exp += e.amount; else if (e.type === 'income') inc += e.amount;
+        switch (debtKindOf(e)) {                  // 与 debtTotals() 一致
+          case 'borrow': dch += e.amount; break;
+          case 'repay': dch -= e.amount; break;
+          case 'lend': cch += e.amount; break;
+          case 'collect': cch -= e.amount; break;
+        }
+      }
+      const savings = r2(openBase + inc - exp);
+      const debt = r2((settings.openingDebt || 0) + dch);
+      const credit = r2((settings.openingCredit || 0) + cch);
+      res.push({ savings, debt, credit, net: r2(savings + Math.max(credit, 0) - Math.max(debt, 0)) });
     }
     return res;
   }

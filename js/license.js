@@ -40,16 +40,64 @@ const License = (() => {
   }
 
   /* ---------- 机器码 ---------- */
+  /* 设备 ID 有效性校验。
+     踩过的坑：安卓的 ANDROID_ID 在很多国产 ROM / Android 10+ 上会被隐私策略屏蔽，
+     直接返回「0000000000000000」。这种字符串是 truthy 的，早期版本直接拿来用了，
+     结果**所有手机算出同一个机器码 D63C-8558-69EA-FB80**，一个授权码全网通用 —— 授权形同虚设。
+     所以拿到任何设备 ID 都必须先验真伪，不能只判断非空。 */
+  const BAD_IDS = new Set([
+    '0000000000000000', '000000000000000', '0', 'null', 'undefined', 'unknown',
+    '9774d56d682e549c',                 // 早期安卓大批设备共用的著名脏值
+    'ffffffffffffffff', '0123456789abcdef',
+  ]);
+  function validDeviceId(v) {
+    if (v === null || v === undefined) return false;
+    const s = String(v).trim().toLowerCase();
+    if (s.length < 8) return false;              // 太短，不可能是真 ID
+    if (BAD_IDS.has(s)) return false;            // 已知脏值
+    if (/^(.)\1+$/.test(s)) return false;        // 全是同一个字符（全 0 / 全 F）
+    if (/^0+$/.test(s.replace(/-/g, ''))) return false;
+    return true;
+  }
+
+  /* ANDROID_ID 不可用时的退路：把一枚随机码写进「文档/富财记备份/」。
+     放在共享文档目录而不是 APP 私有目录，是为了卸载重装后它还在 —— 机器码就不会变。 */
+  const DEV_ID_PATH = '富财记备份/device-id.txt';
+  async function persistedDeviceId() {
+    try {
+      const FS = (window.Capacitor.Plugins || {}).Filesystem;
+      if (!FS) return '';
+      try {
+        const r = await FS.readFile({ path: DEV_ID_PATH, directory: 'DOCUMENTS', encoding: 'utf8' });
+        const v = String(r.data || '').trim();
+        if (validDeviceId(v)) return v;
+      } catch (e) { /* 文件还不存在，往下新建 */ }
+      const nv = randHex(16);
+      await FS.writeFile({
+        path: DEV_ID_PATH, data: nv,
+        directory: 'DOCUMENTS', encoding: 'utf8', recursive: true,
+      });
+      return nv;
+    } catch (e) { return ''; }
+  }
+
   async function rawDeviceId() {
     const p = platform();
     if (p === 'electron' && window.jzNative && window.jzNative.machineId) {
-      try { const id = await window.jzNative.machineId(); if (id) return 'WIN:' + id; } catch (e) { /* fallthrough */ }
+      try { const id = await window.jzNative.machineId(); if (validDeviceId(id)) return 'WIN:' + id; } catch (e) { /* fallthrough */ }
     }
     if (p === 'android') {
       try {
         const Device = (window.Capacitor.Plugins || {}).Device;
-        if (Device) { const d = await Device.getId(); const id = d.identifier || d.uuid || d.androidID; if (id) return 'AND:' + id; }
+        if (Device) {
+          const d = await Device.getId();
+          const id = d.identifier || d.uuid || d.androidID;
+          if (validDeviceId(id)) return 'AND:' + id;
+        }
       } catch (e) { /* fallthrough */ }
+      // ANDROID_ID 被 ROM 屏蔽 → 用写在文档目录里的随机码（卸载重装仍在）
+      const pid = await persistedDeviceId();
+      if (pid) return 'AND2:' + pid;
     }
     // 兜底：本地随机码（卸载重装会变，仅作最后退路）
     let r = localStorage.getItem('jz.devrnd');
