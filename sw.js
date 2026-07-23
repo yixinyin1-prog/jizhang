@@ -1,5 +1,5 @@
 /* Service Worker：缓存应用外壳，实现离线使用 */
-const CACHE = 'jz-cache-v14';
+const CACHE = 'jz-cache-v29';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,8 @@ const ASSETS = [
   './js/license.js',
   './js/modal.js',
   './js/parser.js',
+  './js/ai.js',
+  './js/ocr.js',
   './js/charts.js',
   './js/xlsx.js',
   './js/backup.js',

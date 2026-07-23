@@ -42,12 +42,12 @@ const Store = (() => {
   /* ---------- 默认分类（通用款，人人适用；个性化分类请用「分类」页的批量添加） ---------- */
   const DEFAULT_CATEGORIES = [
     // ----- 支出 -----
-    { id: 'meal',      type: 'expense', name: '日常餐食', icon: '🍚', color: '#e8843c', keywords: ['早餐','早饭','午餐','午饭','晚餐','晚饭','宵夜','夜宵','吃饭','吃面','面条','包子','快餐','米粉','馄饨','盒饭','外卖','食堂','汉堡','披萨'] },
+    { id: 'meal',      type: 'expense', name: '日常餐食', icon: '🍚', color: '#e8843c', keywords: ['早餐','早饭','午餐','午饭','晚餐','晚饭','宵夜','夜宵','吃饭','吃面','面条','包子','快餐','米粉','馄饨','盒饭','外卖','食堂','汉堡','披萨','锅盔','麻辣烫','黄焖鸡','煲仔饭','饺子','炒饭','米线','螺蛳粉','肯德基','麦当劳','华莱士','塔斯汀','沙县','拉面','小吃'] },
     { id: 'dinner',    type: 'expense', name: '聚餐请客', icon: '🍻', color: '#d95f5f', keywords: ['聚餐','请客','烧烤','火锅','酒席','团建'] },
     { id: 'grocery',   type: 'expense', name: '超市买菜', icon: '🛒', color: '#67a97f', keywords: ['超市','买菜','菜市场','生鲜','买米','买水','买盐'] },
     { id: 'fruit',     type: 'expense', name: '水果', icon: '🍉', color: '#7cb342', keywords: ['水果','西瓜','苹果','葡萄','草莓','香蕉','橘子','橙子','梨','桃','榴莲'] },
     { id: 'snack',     type: 'expense', name: '零食', icon: '🍪', color: '#e6a23c', keywords: ['零食','蛋糕','甜点','面包','饼干','薯片','冰淇淋','巧克力','糖'] },
-    { id: 'milktea',   type: 'expense', name: '奶茶咖啡', icon: '🧋', color: '#b3845c', keywords: ['奶茶','咖啡','饮料','果汁','可乐','茶'] },
+    { id: 'milktea',   type: 'expense', name: '奶茶咖啡', icon: '🧋', color: '#b3845c', keywords: ['奶茶','咖啡','饮料','果汁','可乐','茶','蜜雪冰城','瑞幸','星巴克','库迪','霸王茶姬','喜茶','古茗','沪上阿姨','茶百道','益禾堂'] },
     { id: 'rent',      type: 'expense', name: '房租水电', icon: '🏠', color: '#8a6fc8', keywords: ['房租','电费','水费','水电','燃气','物业','取暖'] },
     { id: 'phone',     type: 'expense', name: '话费网费', icon: '📶', color: '#5aa0c8', keywords: ['话费','流量','宽带','电话卡','网费'] },
     { id: 'commute',   type: 'expense', name: '日常通勤', icon: '🚇', color: '#58a55c', keywords: ['地铁','打车','公交','骑行','共享单车','滴滴','出租车','交通','电动车'] },
@@ -70,14 +70,14 @@ const Store = (() => {
     { id: 'lend',      type: 'expense', name: '借出', icon: '🤝', color: '#6b8f9b', debt: 'lend', keywords: ['借给','借出'] },
     { id: 'other',     type: 'expense', name: '其他支出', icon: '🗂️', color: '#9aa5a0', keywords: [] },
     // ----- 收入 -----
-    { id: 'salary',    type: 'income', name: '工资薪水', icon: '💰', color: '#2e8bd8', keywords: ['工资','薪水','发工资','年终奖','奖金'] },
-    { id: 'side_in',   type: 'income', name: '副业收入', icon: '🪙', color: '#38a1a8', keywords: ['副业','兼职','稿费','接单','外快'] },
-    { id: 'invest_in', type: 'income', name: '投资收益', icon: '📊', color: '#7a68c8', keywords: ['收益','分红','利息','基金卖','股票卖'] },
-    { id: 'redpk_in',  type: 'income', name: '红包收入', icon: '🧧', color: '#e08a52', keywords: ['红包入','红包进','红包收','好评'] },
-    { id: 'reimburse', type: 'income', name: '报销退款', icon: '↩️', color: '#52a0e0', keywords: ['报销','退款','返现','退回','退押金','退货'] },
+    { id: 'salary',    type: 'income', name: '工资薪水', icon: '💰', color: '#2e8bd8', keywords: ['工资','薪资','薪水','发工资','发薪','月薪','提成','佣金','加班费','年终奖','奖金'] },
+    { id: 'side_in',   type: 'income', name: '副业收入', icon: '🪙', color: '#38a1a8', keywords: ['副业','兼职','稿费','接单','外快','跑腿','代驾'] },
+    { id: 'invest_in', type: 'income', name: '投资收益', icon: '📊', color: '#7a68c8', keywords: ['收益','分红','利息','股息','基金卖','股票卖','卖出'] },
+    { id: 'redpk_in',  type: 'income', name: '红包收入', icon: '🧧', color: '#e08a52', keywords: ['红包入','红包进','红包收','好评','中奖'] },
+    { id: 'reimburse', type: 'income', name: '报销退款', icon: '↩️', color: '#52a0e0', keywords: ['报销','退款','返现','退回','退押金','退货','退税'] },
     { id: 'borrow',    type: 'income', name: '借入款项', icon: '🏦', color: '#c88a4a', debt: 'borrow', keywords: ['借入','借款','借来','贷款','分付','花呗','借 '] },
     { id: 'collect',   type: 'income', name: '收回借出', icon: '🔙', color: '#7a9b6b', debt: 'collect', keywords: ['收回','还我','归还','要回'] },
-    { id: 'other_in',  type: 'income', name: '其他收入', icon: '💵', color: '#68a8c8', keywords: ['入账','进账','转进','收到'] },
+    { id: 'other_in',  type: 'income', name: '其他收入', icon: '💵', color: '#68a8c8', keywords: ['入账','进账','转进','收到','收款','到账','补贴','津贴','公积金','卖了'] },
   ];
 
   /* ---------- 主题 ---------- */
@@ -108,6 +108,9 @@ const Store = (() => {
     savingsGoals: [],      // 存钱计划 [{id,name,target,base,startDate,note}]
     monthlyGoal: 0,        // 每月储蓄目标（收入−支出 要达到多少），0=不设
     license: { code: '', activatedAt: 0 },   // 授权码（电脑/安卓需要）
+    // AI 模型接入（可选）：填自己的 OpenAI 兼容接口，用于截图记账等智能功能。
+    // 不填就完全不联网；填了也只把数据发给你自己指定的服务商。
+    ai: { url: '', key: '', model: '' },
     backup: {
       enabled: false, onExit: true, times: ['08:00', '20:00'], keep: 14,
       lastRun: {}, dirName: '',
@@ -128,6 +131,7 @@ const Store = (() => {
   if (!categories) { categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)); saveJSON(K_CATS, categories); }
   let settings = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), loadJSON(K_SETTINGS, {}));
   settings.backup = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS.backup)), settings.backup || {});
+  settings.ai = Object.assign({ url: '', key: '', model: '' }, settings.ai || {});
 
   let accounts = loadJSON(K_ACCOUNTS, null);
   let ledgers = loadJSON(K_LEDGERS, null);
@@ -167,6 +171,25 @@ const Store = (() => {
       const bor = categories.find(c => c.id === 'borrow');
       if (bor && !bor.keywords.includes('借 ')) bor.keywords.push('借 ');
       dirty = true;
+    }
+    /* 给老用户的内置收入分类补上新增关键词（幂等 merge）。
+       起因：「薪资 8508.3」被判成支出——词表里只有「工资/薪水」没有「薪资/发薪/提成」这些常见说法。
+       只补内置 id 的分类、只加不删，不影响用户自己删改过的其他关键词。 */
+    const KW_SUPPLEMENT = {
+      salary: ['薪资', '发薪', '月薪', '提成', '佣金', '加班费'],
+      side_in: ['跑腿', '代驾'],
+      invest_in: ['股息', '卖出'],
+      redpk_in: ['中奖'],
+      reimburse: ['退税'],
+      other_in: ['收款', '到账', '补贴', '津贴', '公积金', '卖了'],
+      milktea: ['蜜雪冰城', '瑞幸', '星巴克', '库迪', '霸王茶姬', '喜茶', '古茗', '沪上阿姨', '茶百道', '益禾堂'],
+      meal: ['锅盔', '麻辣烫', '黄焖鸡', '煲仔饭', '饺子', '炒饭', '米线', '螺蛳粉', '肯德基', '麦当劳', '华莱士', '塔斯汀', '沙县', '拉面', '小吃'],
+    };
+    for (const [cid, kws] of Object.entries(KW_SUPPLEMENT)) {
+      const c = categories.find(x => x.id === cid);
+      if (!c) continue;
+      if (!Array.isArray(c.keywords)) c.keywords = [];
+      for (const kw of kws) if (!c.keywords.includes(kw)) { c.keywords.push(kw); dirty = true; }
     }
     if (dirty) saveJSON(K_CATS, categories);
   }
@@ -325,6 +348,8 @@ const Store = (() => {
       acctId: e.acctId || null,           // 绑定的资金账户；null=默认现金账户
       ledgerId: e.ledgerId || ledgerForNew(),
       manual: !!e.manual,
+      // 多账户自动分账时「没认出账户」的标记：余额暂由现金吸收，UI 标红提醒手动指定
+      ...(e.unassigned ? { unassigned: true } : {}),
     };
   }
   function addEntry(e) {
@@ -494,6 +519,37 @@ const Store = (() => {
     const a = getAccount(id); if (!a) return;
     if (patch.opening !== undefined) patch.opening = r2(patch.opening);
     Object.assign(a, patch); persistAccounts();
+  }
+  /* 把某账户余额校准成「实际余额」。
+     做法：算出差额，补进该账户的「期初基准」——不生成假的收支记录、不污染真实收支统计，
+     账户余额/积蓄/净资产会自动对上。每次校准都留一条日志，可追溯改了哪天、从多少改到多少。
+     用于：记账初期期初填得不准、或后续漏记导致余额和实际对不上。 */
+  function calibrateAccount(id, actual, dateStr) {
+    const a = getAccount(id); if (!a) return null;
+    const cur = accountBalance(id);
+    const diff = r2(Number(actual) - cur);
+    if (!diff) return { diff: 0, from: cur, to: cur };
+    a.opening = r2((a.opening || 0) + diff);
+    persistAccounts();
+    if (!Array.isArray(settings.balanceAdjustLog)) settings.balanceAdjustLog = [];
+    settings.balanceAdjustLog.unshift({ date: dateStr || '', acctId: id, name: a.name, from: cur, to: r2(Number(actual)), diff });
+    saveJSON(K_SETTINGS, settings);
+    return { diff, from: cur, to: r2(Number(actual)) };
+  }
+  const getAdjustLog = () => settings.balanceAdjustLog || [];
+
+  /* 按备注匹配账户：备注里出现了哪个账户的名字，就归到哪个账户。
+     只在多账户时有意义；名字长的优先（避免「工行」抢了「工行信用卡」的匹配）。
+     没匹配到返回 null（表现为「未分账」，暂由默认现金吸收，UI 上标红提醒手动调）。 */
+  function matchAccount(note) {
+    if (accounts.length <= 1) return null;
+    const s = String(note || '');
+    if (!s) return null;
+    const sorted = accounts.slice().sort((a, b) => (b.name || '').length - (a.name || '').length);
+    for (const a of sorted) {
+      if (a.name && a.name.length >= 2 && s.includes(a.name)) return a.id;
+    }
+    return null;
   }
   function removeAccount(id, moveTo) {
     if (id === DEFAULT_ACCT) return;              // 默认现金账户不可删
@@ -854,6 +910,49 @@ const Store = (() => {
       return { ym, saved, goal, met: goal > 0 && saved >= goal, gap: r2(goal - saved) };
     });
   }
+  /* 某一年的储蓄总览：12 个月各存下多少 + 全年累计（每月「真实收入−真实支出」求和，
+     存下的月为正、花超的月为负，加起来就是这一年实际攒下/透支了多少）。 */
+  function goalYearSummary(year) {
+    const goal = getMonthlyGoal();
+    const months = [];
+    let total = 0;
+    for (let m = 1; m <= 12; m++) {
+      const ym = year + '-' + String(m).padStart(2, '0');
+      const list = inMonth(ym);
+      const saved = totals(list).balanceReal;
+      total += saved;
+      months.push({ ym, saved, goal, met: goal > 0 && saved >= goal, gap: r2(goal - saved), hasData: list.length > 0 });
+    }
+    const withData = months.filter(m => m.hasData);
+    // 手动校正值：记账算出的年累计和实际存款对不上时，用户可校准（不改任何记账记录）
+    const adjust = r2((settings.goalYearAdjust || {})[String(year)] || 0);
+    return {
+      year: String(year), months,
+      rawTotal: r2(total), adjust, total: r2(total + adjust),
+      metCount: withData.filter(m => m.met).length, dataMonths: withData.length,
+    };
+  }
+  /* 设置某年「累计存下」的手动校正差额；传 0 即清除 */
+  function setGoalYearAdjust(year, adj) {
+    if (!settings.goalYearAdjust) settings.goalYearAdjust = {};
+    if (!adj) delete settings.goalYearAdjust[String(year)];
+    else settings.goalYearAdjust[String(year)] = r2(adj);
+    saveJSON(K_SETTINGS, settings);
+  }
+  /* 某一年内的「最长连续达成」月数。
+     以前用全局 goalStreak（从最近月往前数），但界面按年查看时它不随所选年份变、
+     最近月一没达标就一直是 0 —— 用户以为数据没更新。改成看所选年份内的最好连续记录。 */
+  function goalYearStreak(year) {
+    const goal = getMonthlyGoal();
+    if (goal <= 0) return 0;
+    let run = 0, best = 0;
+    for (const m of goalYearSummary(year).months) {
+      if (!m.hasData) continue;
+      if (m.met) { run++; if (run > best) best = run; }
+      else run = 0;
+    }
+    return best;
+  }
   /* 连续达成月数（从最近有数据的月份往前数；当月还没过完也算，避免误判为断连） */
   function goalStreak() {
     const goal = getMonthlyGoal();
@@ -944,6 +1043,7 @@ const Store = (() => {
     monthlyDebtSeries, monthlySavingsSeries, yearCatMatrix, buckets, years, unknownCount,
     // 账户
     getAccountKinds, getAccounts, getAccount, addAccount, updateAccount, removeAccount,
+    calibrateAccount, getAdjustLog, matchAccount,
     accountBalance, accountsSnapshot, addTransfer, DEFAULT_ACCT,
     // 账本
     getLedgers, getLedger, activeLedger, setActiveLedger, ledgerForNew, ledgerOf,
@@ -952,7 +1052,7 @@ const Store = (() => {
     dataMonths, monthsOfYear, periodStats, catMonthlyAmounts, catStat, median, mean, catSpent, monthRealExpense,
     getBudgets, getBudget, setBudget, getTotalBudget, setTotalBudget, autoBudgets,
     getSavingsGoals, addSavingsGoal, updateSavingsGoal, removeSavingsGoal, goalProgress,
-    getMonthlyGoal, setMonthlyGoal, monthlyGoalHistory, goalStreak, budgetSurplus,
+    getMonthlyGoal, setMonthlyGoal, monthlyGoalHistory, goalYearSummary, setGoalYearAdjust, goalStreak, goalYearStreak, budgetSurplus,
     getSettings, updateSettings, getThemes, getTheme, isDirty, markClean,
     exportAll, importBackup, clearAll, resetCategoriesToDefault, storageSize,
   };

@@ -215,9 +215,21 @@ const Charts = (() => {
   }
 
   /* 迷你折线图（对比页分类矩阵用），series: [{name,color,values}] */
+  /* 迷你走势图底部的月份刻度（1~12）。opts.axis=true 时显示，避免只能靠悬停看月份。 */
+  function monthAxis(svg, labels, P, W, H, gwHalf) {
+    labels.forEach((lb, i) => {
+      const n = String(lb).replace(/[^0-9]/g, '') || (i + 1);
+      // 12 个太挤，只标 1/4/7/10/12（首尾+季度），其余留白
+      if (!(i === 0 || i === labels.length - 1 || (i + 1) % 3 === 1)) return;
+      const x = P.l + gwHalf(i);
+      svg.appendChild(el('text', { x, y: H - 1.5, 'text-anchor': 'middle', 'font-size': 7, fill: '#9aa8a1' }, n));
+    });
+  }
+
   function sparkLines(labels, series, opts = {}) {
-    const W = opts.width || 210, H = opts.height || 62;
-    const P = { l: 3, r: 3, t: 6, b: 3 };
+    const axis = !!opts.axis;
+    const W = opts.width || 210, H = (opts.height || 62) + (axis ? 11 : 0);
+    const P = { l: 3, r: 3, t: 6, b: axis ? 13 : 3 };
     const cw = W - P.l - P.r, ch = H - P.t - P.b;
     const max = Math.max(1, ...series.flatMap(s => s.values));
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: H });
@@ -232,13 +244,15 @@ const Charts = (() => {
       path.appendChild(el('title', {}, `${s.name}: 合计 ${fmt(s.values.reduce((a, b) => a + b, 0))}`));
       svg.appendChild(path);
     }
+    if (axis) monthAxis(svg, labels, P, W, H, (i) => step * i);
     return svg;
   }
 
   /* 迷你分组柱（对比页分类矩阵用） */
   function sparkBars(labels, series, opts = {}) {
-    const W = opts.width || 210, H = opts.height || 62;
-    const P = { l: 3, r: 3, t: 6, b: 3 };
+    const axis = !!opts.axis;
+    const W = opts.width || 210, H = (opts.height || 62) + (axis ? 11 : 0);
+    const P = { l: 3, r: 3, t: 6, b: axis ? 13 : 3 };
     const cw = W - P.l - P.r, ch = H - P.t - P.b;
     const max = Math.max(1, ...series.flatMap(s => s.values));
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: H });
@@ -253,6 +267,7 @@ const Charts = (() => {
         svg.appendChild(r);
       });
     });
+    if (axis) monthAxis(svg, labels, P, W, H, (i) => gw * i + gw / 2);
     return svg;
   }
 

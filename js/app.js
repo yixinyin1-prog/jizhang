@@ -46,6 +46,7 @@ const S = {
   finPeriod: 'month',         // 财务管理看月还是看年
   finAnchor: todayStr(),      // 财务管理当前锚点日期
   finChart: 'bar',            // 中位数/平均数图形态：bar | line
+  goalYear: todayStr().slice(0, 4),   // 存钱计划查看的年份
   recordMode: 'expense',      // 记账页：expense | income | transfer
   recordDate: todayStr(),
   parsed: [],
@@ -341,20 +342,32 @@ async function openLedgerPicker() {
   const active = Store.activeLedger();
   const paint = () => {
     const ledgers = Store.getLedgers();
-    const row = (id, icon, name, on) =>
-      `<button class="ledger-row ${on ? 'on' : ''}" data-id="${id}">
-         <span class="lr-ico">${icon}</span><span class="lr-name">${esc(name)}</span>${on ? '<span class="lr-ck">✓</span>' : ''}
-       </button>`;
+    const row = (id, icon, name, on, editable) =>
+      `<div class="ledger-row ${on ? 'on' : ''}" data-id="${id}" style="display:flex;align-items:center;gap:8px">
+         <button class="lr-pick" data-id="${id}" style="flex:1;display:flex;align-items:center;gap:8px;background:none;border:0;cursor:pointer;text-align:left;padding:0;color:inherit;font:inherit">
+           <span class="lr-ico">${icon}</span><span class="lr-name">${esc(name)}</span>${on ? '<span class="lr-ck">✓</span>' : ''}
+         </button>
+         ${editable ? `<button class="lr-edit" data-id="${id}" title="改名 / 换图标" style="background:none;border:0;cursor:pointer;font-size:1rem;padding:4px">✏️</button>` : ''}
+       </div>`;
     body.innerHTML = `
       <div class="ledger-list">
-        ${row('all', '📚', '全部账本（所有账目一起）', active === 'all')}
-        ${ledgers.map(l => row(l.id, l.icon || '📒', l.name, active === l.id)).join('')}
+        ${row('all', '📚', '全部账本（所有账目一起）', active === 'all', false)}
+        ${ledgers.map(l => row(l.id, l.icon || '📒', l.name, active === l.id, true)).join('')}
       </div>
       <button class="btn ghost block" id="lpAdd">＋ 新建账本</button>
-      <div class="sub" style="margin:8px 0 0">在「个人中心 → 常规」里可以改名、换图标或删除账本。</div>`;
-    body.querySelectorAll('.ledger-row').forEach(b => b.onclick = () => {
+      <div class="sub" style="margin:8px 0 0">点账本名切换；点 ✏️ 可给账本改名、换图标。</div>`;
+    body.querySelectorAll('.lr-pick').forEach(b => b.onclick = () => {
       Store.setActiveLedger(b.dataset.id);
       body._done(true);
+    });
+    body.querySelectorAll('.lr-edit').forEach(b => b.onclick = async (e) => {
+      e.stopPropagation();
+      const l = Store.getLedger(b.dataset.id);
+      const res = await Modal.form('编辑账本', [
+        { key: 'name', label: '账本名称', value: l.name },
+        { key: 'icon', label: '图标（emoji）', value: l.icon || '📒', hint: '可从手机表情里挑一个，例如 💼 ✈️ 🏠 🐱' },
+      ], { okText: '保存' });
+      if (res && res.name.trim()) { Store.updateLedger(b.dataset.id, { name: res.name.trim(), icon: (res.icon || '').trim() || '📒' }); toast('账本已更新'); paint(); }
     });
     $('#lpAdd', body).onclick = async () => {
       const name = await Modal.prompt('新建账本', { placeholder: '例：生意账、旅行账、家庭账' });
@@ -391,22 +404,37 @@ function catSelect(catId, type, cls) {
 /* 记账时用哪个账户：只有一个账户就不折腾，返回 null（归到现金） */
 function currentRecAcct() {
   const accs = Store.getAccounts();
-  if (accs.length <= 1) return null;
-  const want = S.recordAcct || Store.getSettings().lastAcct || accs[0].id;
-  return accs.some(a => a.id === want) ? want : accs[0].id;
+  if (accs.length <= 1) return null;               // 单账户：维持原样，全部自动归现金
+  const want = S.recordAcct || Store.getSettings().lastAcct || '__auto__';
+  if (want === '__auto__') return '__auto__';
+  return accs.some(a => a.id === want) ? want : '__auto__';
+}
+/* 多账户时按备注解析这笔该记到哪个账户。
+   返回 {acctId, unassigned}：unassigned=true 表示没认出（暂记现金 + 标红提醒）。 */
+function resolveAcctFor(note) {
+  const sel = currentRecAcct();
+  if (sel === null) return { acctId: null, unassigned: false };        // 单账户
+  if (sel !== '__auto__') return { acctId: sel, unassigned: false };   // 手动指定了账户
+  const m = Store.matchAccount(note);
+  return m ? { acctId: m, unassigned: false } : { acctId: null, unassigned: true };
 }
 /* 记账页顶部的「记到账户」选择条：多于一个账户才显示 */
 function acctPickerRow() {
   const accs = Store.getAccounts();
   if (accs.length <= 1) return '';
   const cur = currentRecAcct();
+  const total = Store.accountsSnapshot().total;
   return `
-  <div class="acct-pick card" style="padding:12px 16px;margin-bottom:12px">
+  <div class="acct-pick card" style="padding:12px 16px;margin-bottom:12px;flex-wrap:wrap">
     <span style="font-size:.86rem;font-weight:600">记到账户</span>
-    <select id="recAcct" style="flex:1">
+    <select id="recAcct" style="flex:1;min-width:180px">
+      <option value="__auto__" ${cur === '__auto__' ? 'selected' : ''}>🪄 自动识别（备注里写账户名）</option>
       ${accs.map(a => `<option value="${a.id}" ${cur === a.id ? 'selected' : ''}>${a.icon || '💼'} ${esc(a.name)}（余 ${fmtM(Store.accountBalance(a.id))}）</option>`).join('')}
     </select>
     <button class="btn ghost small" id="recTransfer">🔄 转账</button>
+    <span style="flex-basis:100%;font-size:.74rem;color:var(--text-3);margin-top:4px">
+      总余额 <b>${fmtM(total)}</b> · 自动识别时备注里写账户名（如「${esc(accs[1] ? accs[1].name : accs[0].name)}买菜 30」）就会记到那个账户；没写的暂记现金并标 <span style="color:var(--danger)">⚠ 未分账</span>
+    </span>
   </div>`;
 }
 
@@ -781,45 +809,85 @@ function bindFinBudget() {
 ============================================================ */
 function viewFinGoals() {
   const goal = Store.getMonthlyGoal();
-  const hist = Store.monthlyGoalHistory(12);
-  const streak = Store.goalStreak();
   const thisMonth = todayStr().slice(0, 7);
-  const cur = hist.find(h => h.ym === thisMonth);
-  const met = hist.filter(h => h.met).length;
-  const rate = goal > 0 && hist.length ? Math.round(met / hist.length * 100) : 0;
   const surplus = Store.budgetSurplus(thisMonth);
 
-  /* ---- 每月储蓄目标（第二条线：收入−支出）---- */
+  // 可选年份：有数据的年 + 今年，确保今年也能选
+  const years = Array.from(new Set([...Store.years(), todayStr().slice(0, 4)])).sort();
+  if (!years.includes(S.goalYear)) S.goalYear = years[years.length - 1];
+  const yr = Store.goalYearSummary(S.goalYear);
+  const streak = Store.goalYearStreak(S.goalYear);   // 所选年份内的最长连续达成
+  const cur = yr.months.find(h => h.ym === thisMonth);
+  const rate = goal > 0 && yr.dataMonths ? Math.round(yr.metCount / yr.dataMonths * 100) : 0;
+  const totalPos = yr.total >= 0;
+
+  /* ---- 每月储蓄目标 + 年度计划汇总 ---- */
+  const yearGoal = goal * 12;                              // 年度目标 = 每月目标 × 12
+  const yearMet = goal > 0 && yr.total >= yearGoal;
+  const yearPct = yearGoal > 0 ? Math.min(100, Math.max(0, Math.round(yr.total / yearGoal * 100))) : 0;
   const monthlyCard = `
   <div class="card">
-    <h3>📅 每月储蓄目标</h3>
-    <div class="sub">每月要存下多少（存下 = 真实收入 − 真实支出，借来的钱不算存下）。<br>
-      设好后，下面每个月自动打勾或警示。</div>
-    <div class="row">
-      <input type="number" id="mgInput" value="${goal || ''}" placeholder="每月想存多少" step="100">
-      <button class="btn small narrow" id="mgSave">保存</button>
+    <h3>📅 存钱计划（月度 & 年度）</h3>
+    <div class="sub">存下 = 真实收入 − 真实支出，借来的钱不算存下。年度目标 = 每月目标 × 12。</div>
+
+    <div class="pill-group" style="margin-top:6px">
+      ${years.map(y => `<button class="pill yr ${S.goalYear === y ? 'active' : ''}" data-gy="${y}">${y}年</button>`).join('')}
     </div>
+
+    <div class="hero" style="margin:12px 0 4px">
+      <div class="h-label">${S.goalYear} 年累计存下（${yr.dataMonths} 个月${yr.adjust ? `，含手动校正 ${yr.adjust > 0 ? '+' : ''}${fmtM(yr.adjust)}` : ''}）</div>
+      <div class="h-big" style="color:${totalPos ? '#eafff5' : '#ffe2da'}">¥ ${fmtM(yr.total)}</div>
+      ${goal > 0 ? `
+        <div class="h-label" style="margin-top:6px">年度目标 ${fmtM(yearGoal)} ·
+          ${yearMet ? '🏆 已达标，超出 ' + fmtM(yr.total - yearGoal) : '还差 ' + fmtM(yearGoal - yr.total) + '（完成 ' + yearPct + '%）'}
+        </div>
+        <div class="bar-bg" style="height:8px;margin-top:8px;background:rgba(255,255,255,.25)">
+          <div class="bar-fg" style="width:${yearPct}%;background:${yearMet ? '#ffd76a' : '#eafff5'}"></div>
+        </div>` : `<div class="h-label">${totalPos ? '这一年净攒下的钱' : '这一年花得比挣得多，透支了'}</div>`}
+    </div>
+    <div class="row" style="justify-content:flex-end;margin:6px 0 10px">
+      <button class="btn ghost small" id="mgCalib">⚖️ 校准实际存款</button>
+    </div>
+
     ${goal > 0 ? `
       <div class="ach-strip">
         <div class="ach-box ${streak >= 3 ? 'hot' : ''}">
-          <div class="ach-n">${streak}</div><div class="ach-l">连续达成（月）${streak >= 3 ? ' 🔥' : ''}</div>
+          <div class="ach-n">${streak}</div><div class="ach-l">${S.goalYear}年最长连续达成${streak >= 3 ? ' 🔥' : ''}</div>
         </div>
-        <div class="ach-box"><div class="ach-n">${met}/${hist.length}</div><div class="ach-l">达成月数</div></div>
+        <div class="ach-box"><div class="ach-n">${yr.metCount}/${yr.dataMonths}</div><div class="ach-l">${S.goalYear}年达成</div></div>
         <div class="ach-box ${rate >= 60 ? 'good' : ''}"><div class="ach-n">${rate}%</div><div class="ach-l">达成率</div></div>
       </div>
       ${cur ? (cur.met
         ? `<div class="ach-banner done">🎉 本月已达成！存下 ${fmtM(cur.saved)}，超出目标 ${fmtM(cur.saved - goal)}</div>`
         : `<div class="ach-banner warn">⚠️ 本月还差 <b>${fmtM(cur.gap)}</b> 才够目标（目前存下 ${fmtM(cur.saved)}）</div>`) : ''}
-      <label class="fld">最近 ${hist.length} 个月</label>
+    ` : ''}
+
+    <label class="fld">每月储蓄目标（存钱标准线，可随时调）</label>
+    <div class="row">
+      <input type="number" id="mgInput" value="${goal || ''}" placeholder="每月想存多少" step="100">
+      <button class="btn small narrow" id="mgSave">保存</button>
+    </div>
+
+    ${goal > 0 ? `
+      <label class="fld">${S.goalYear} 年各月：✅ 达标 · ⚠️ 存了但没够 · ❌ 入不敷出</label>
+      <div class="sub" style="margin:0 0 6px">每格两行数：<b>存</b> = 当月存下多少（收入−支出）；<b>差</b> = 比每月目标多存/少存多少</div>
       <div class="month-grid">
-        ${hist.map(h => `
-          <div class="mg-cell ${h.met ? 'met' : 'miss'}" title="${h.ym} 存下 ${fmtM(h.saved)} / 目标 ${fmtM(goal)}">
-            <div class="mg-ym">${h.ym.slice(2).replace('-', '/')}</div>
-            <div class="mg-ico">${h.met ? '✅' : '❌'}</div>
-            <div class="mg-v">${Charts.fmt(h.saved)}</div>
-          </div>`).join('')}
+        ${yr.months.filter(h => h.hasData).map(h => {
+          const d = Math.round((h.saved - goal) * 100) / 100;
+          // 三态：达标 ✅ / 有存但没到目标 ⚠️ / 入不敷出（存款为负）❌
+          const state = h.met ? 'met' : (h.saved >= 0 ? 'warn' : 'miss');
+          const ico = h.met ? '✅' : (h.saved >= 0 ? '⚠️' : '❌');
+          const stateTxt = h.met ? '达标' : (h.saved >= 0 ? '存了但没到目标' : '入不敷出');
+          return `
+          <div class="mg-cell ${state}" title="${h.ym} 存下 ${fmtM(h.saved)} / 目标 ${fmtM(goal)} · ${stateTxt}（${d >= 0 ? '高于' : '低于'}标准线 ${fmtM(Math.abs(d))}）">
+            <div class="mg-ym">${(+h.ym.slice(5)) + '月'}</div>
+            <div class="mg-ico">${ico}</div>
+            <div class="mg-v"><i style="font-style:normal;color:var(--text-3)">存</i> ${Charts.fmt(h.saved)}</div>
+            <div class="mg-diff" style="color:${d >= 0 ? 'var(--brand)' : 'var(--danger)'}"><i style="font-style:normal;color:var(--text-3)">差</i> ${d >= 0 ? '+' : ''}${Charts.fmt(d)}</div>
+          </div>`;
+        }).join('') || '<div class="empty" style="padding:12px 0">这一年还没有记录</div>'}
       </div>
-    ` : '<div class="sub" style="margin:10px 0 0">还没设目标。设一个，就能看到每月有没有存到钱。</div>'}
+    ` : '<div class="sub" style="margin:10px 0 0">还没设目标。设一个，就能看到每月有没有存到钱、年度差多少。</div>'}
   </div>`;
 
   /* ---- 预算执行 → 省下多少（第一条线：靠守额度存钱）---- */
@@ -865,6 +933,29 @@ function viewFinGoals() {
 
 function bindFinGoals() {
   $('#mgSave').onclick = () => { Store.setMonthlyGoal(parseFloat($('#mgInput').value) || 0); toast('每月储蓄目标已更新'); render(); };
+  $$('.pill.yr[data-gy]').forEach(b => b.onclick = () => { S.goalYear = b.dataset.gy; render(); });
+
+  /* 校准某年「累计存下」：记账算的和实际存款对不上时手动修正（不改任何记账记录） */
+  $('#mgCalib').onclick = async () => {
+    const yr = Store.goalYearSummary(S.goalYear);
+    const val = await Modal.prompt(`校准 ${S.goalYear} 年实际存款`, {
+      value: String(yr.total),
+      hint: `按记账流水算，这一年累计存下 <b>${fmtM(yr.rawTotal)}</b>${yr.adjust ? `（当前含手动校正 ${yr.adjust > 0 ? '+' : ''}${fmtM(yr.adjust)}）` : ''}。<br>填这一年<b>实际</b>存下的总额，系统会记一笔校正差额。<br>只影响这里的年度累计显示，<b>不改任何记账记录</b>；想复原就再校准回 ${fmtM(yr.rawTotal)}。`,
+      okText: '下一步',
+    });
+    if (val === null) return;
+    const actual = parseFloat(val);
+    if (isNaN(actual)) { toast('请输入数字'); return; }
+    const adj = Math.round((actual - yr.rawTotal) * 100) / 100;
+    if (Math.abs(adj - yr.adjust) < 0.005) { toast('和当前显示一致，无需校准'); return; }
+    const ok = await Modal.confirm('确认校准（请谨慎）', {
+      text: `${S.goalYear} 年「累计存下」将显示为 ${fmtM(actual)}\n（记账计算 ${fmtM(yr.rawTotal)} ${adj >= 0 ? '+' : '−'} 校正 ${fmtM(Math.abs(adj))}）\n\n· 不改动任何记账记录和账户余额\n· 年度达标按校准后的数判断\n· 随时可以再次校准或改回`,
+      okText: '确认校准', danger: true,
+    });
+    if (!ok) return;
+    Store.setGoalYearAdjust(S.goalYear, adj);
+    toast('已校准'); render();
+  };
   const gb = $('#mgGoBudget');
   if (gb) gb.onclick = () => { S.finSub = 'budget'; render(); };
   const addGoal = $('#finAddGoal');
@@ -894,6 +985,20 @@ function bindFinGoals() {
    账户页
 ============================================================ */
 function kindName(k) { const x = Store.getAccountKinds().find(z => z.kind === k); return x ? x.name : '其他'; }
+
+/* 期初负债输入的实时预览：告诉用户填了这个值后「当前欠款」会变成多少。
+   解决困惑：有的账里还款记得比借入多（早期花呗付款没记「借」），
+   填的期初负债会先被这个差额吸收，用户以为「填了没变化」。 */
+function opDebtPreviewText(openingDebt) {
+  const dt = Store.debtTotals(Store.getEntries());
+  const raw = (Number(openingDebt) || 0) + dt.borrow - dt.repay;   // 未钳零的负债
+  const shown = Math.max(raw, 0);
+  const gap = dt.repay - dt.borrow;   // 还款比借入多多少
+  if (gap > 0.005 && raw <= 0) {
+    return `⚠️ 你的账里累计还款比借入多 <b>${fmtM(gap)}</b>（早期花呗付款常没记「借」）。要让净资产体现欠款，期初负债需填到 <b>${fmtM(gap)}</b> 以上；想让当前欠款显示为 X，就填 ${fmtM(gap)}+X。`;
+  }
+  return `按现在的填法，<b>当前欠款 = ${fmtM(shown)}</b>（期初 ${fmtM(Number(openingDebt) || 0)} ＋ 借入 ${fmtM(dt.borrow)} − 还款 ${fmtM(dt.repay)}）。`;
+}
 
 function viewAccounts() {
   const as = Store.assetsAsOf('9999-12-31');
@@ -933,7 +1038,16 @@ function viewAccounts() {
     <div class="row" style="margin-top:12px">
       <button class="btn" id="acAdd">＋ 新建账户</button>
       <button class="btn ghost" id="acTransfer">🔄 转账</button>
+      <button class="btn ghost" id="acCalib">⚖️ 校准余额</button>
     </div>
+    <div class="sub" style="margin-top:8px">余额和实际对不上时（期初填错 / 漏记），用「校准」把某账户改成实际余额，系统会自动补差、不影响收支统计。</div>
+    ${Store.getAdjustLog().length ? `
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:.82rem;color:var(--text-3)">校准记录（${Store.getAdjustLog().length} 次）</summary>
+      <div class="debt-ledger" style="margin-top:8px">
+        ${Store.getAdjustLog().slice(0, 20).map(g => `<div class="dl-row"><span>${g.date || '—'} · ${esc(g.name)}</span><b>${fmtM(g.from)} → ${fmtM(g.to)}（${g.diff > 0 ? '+' : ''}${fmtM(g.diff)}）</b></div>`).join('')}
+      </div>
+    </details>` : ''}
   </div>
 
   <div class="card">
@@ -963,6 +1077,7 @@ function viewAccounts() {
       <div class="sr-t"><b>期初负债（我欠别人）</b><span>花呗、分付、信用卡已用额度、跟人借的</span></div>
       <input type="number" id="opDebt" value="${Store.getSettings().openingDebt || 0}" step="0.01" style="flex:0 0 130px">
     </div>
+    <div class="sub" id="opDebtPreview" style="margin:-4px 0 6px">${opDebtPreviewText(Store.getSettings().openingDebt || 0)}</div>
     <div class="set-row">
       <div class="sr-t"><b>期初债权（别人欠我）</b><span>记账前别人欠我的钱</span></div>
       <input type="number" id="opCredit" value="${Store.getSettings().openingCredit || 0}" step="0.01" style="flex:0 0 130px">
@@ -980,8 +1095,47 @@ function bindAccounts() {
   $$('.acct-row').forEach(b => b.onclick = () => editAccount(b.dataset.id));
   $('#acAdd').onclick = () => editAccount(null);
   $('#acTransfer').onclick = doTransfer;
-  $('#opDebt').onchange = ev => { Store.updateSettings({ openingDebt: Math.round((parseFloat(ev.target.value) || 0) * 100) / 100 }); render(); };
+  const cb = $('#acCalib');
+  if (cb) cb.onclick = calibrateBalance;
+  const opd = $('#opDebt');
+  if (opd) {
+    opd.oninput = ev => { const p = $('#opDebtPreview'); if (p) p.innerHTML = opDebtPreviewText(parseFloat(ev.target.value) || 0); };
+    opd.onchange = ev => { Store.updateSettings({ openingDebt: Math.round((parseFloat(ev.target.value) || 0) * 100) / 100 }); render(); };
+  }
   $('#opCredit').onchange = ev => { Store.updateSettings({ openingCredit: Math.round((parseFloat(ev.target.value) || 0) * 100) / 100 }); render(); };
+}
+
+/* 校准某账户余额到实际值：慎重操作，强弹窗确认，显示会补的差额。 */
+async function calibrateBalance() {
+  const accs = Store.getAccounts();
+  let acctId = accs[0].id;
+  if (accs.length > 1) {
+    const pick = await Modal.choose('校准哪个账户', accs.map(a => ({
+      value: a.id, label: `${a.icon || '💼'} ${a.name}`, hint: `当前余额 ${fmtM(Store.accountBalance(a.id))}`,
+    })), { hint: '选一个余额和实际对不上的账户' });
+    if (!pick) return;
+    acctId = pick;
+  }
+  const acc = Store.getAccount(acctId);
+  const cur = Store.accountBalance(acctId);
+  const val = await Modal.prompt(`校准「${acc.name}」余额`, {
+    value: String(cur),
+    hint: `系统当前算出的余额是 <b>${fmtM(cur)}</b>。<br>请填这个账户此刻的<b>实际余额</b>（银行卡/钱包里真实的数），系统会自动补上差额。`,
+    okText: '下一步',
+  });
+  if (val === null) return;
+  const actual = parseFloat(val);
+  if (isNaN(actual)) { toast('请输入数字'); return; }
+  const diff = Math.round((actual - cur) * 100) / 100;
+  if (diff === 0) { toast('余额一致，无需校准'); return; }
+  const ok = await Modal.confirm('确认校准（请谨慎）', {
+    text: `「${acc.name}」余额将从 ${fmtM(cur)} 调整为 ${fmtM(actual)}。\n系统会补一笔 ${diff > 0 ? '增加' : '减少'} ${fmtM(Math.abs(diff))} 的差额到期初基准。\n\n· 不影响你的收支统计和已有记录\n· 会留一条校准记录（今天 ${todayStr()}）便于日后核对\n· 若只是暂时对不上，建议先查明原因再校准`,
+    okText: '确认校准', danger: true,
+  });
+  if (!ok) return;
+  const r = Store.calibrateAccount(acctId, actual, todayStr());
+  toast(`已校准：${fmtM(r.from)} → ${fmtM(r.to)}`);
+  render();
 }
 
 async function editAccount(id) {
@@ -1072,11 +1226,18 @@ function viewRecord() {
   <div class="layout-wide">
   <div class="col">
   <div class="card">
-    <h3>⚡ 快速记账</h3>
+    <h3>⚡ 快速记账
+      <label style="float:right;display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:600;color:var(--text-2);cursor:pointer">
+        <input type="checkbox" id="aiRecEnable" ${AI.ready() && Store.getSettings().ai.enabled !== false ? 'checked' : ''}> AI 记账识别
+      </label>
+    </h3>
     <div class="sub">多笔收支写在一起，用逗号分开，自动拆分、判断收支并归类。日期可在下方修改。</div>
     <input type="date" id="recDate" value="${S.recordDate}" style="margin-bottom:10px">
     <textarea id="smartText" placeholder="例：咖啡 15，超市购物 68.5，工资收入 8000"></textarea>
     <button class="btn block" id="btnParse">解析</button>
+    <button class="btn ghost block" id="btnAiShot" style="margin-top:8px">📷 截图记账（${AI.ready() && Store.getSettings().ai.enabled !== false ? 'AI 识别' : '本地识别，免配置'}）</button>
+    <input type="file" id="aiShotFile" accept="image/*" hidden>
+    <div class="sub" id="aiShotStatus" style="margin:6px 0 0"></div>
     <div class="parse-list" id="parseList">${renderParseList()}</div>
     ${S.parsed.length ? `<button class="btn block" id="btnSaveParsed">✔ 保存这 ${S.parsed.length} 笔</button>` : ''}
   </div>
@@ -1117,7 +1278,7 @@ function renderParseList() {
   return S.parsed.map((p, i) => `
     <div class="parse-item" data-i="${i}">
       <button class="p-type ${p.type === 'expense' ? 't-expense' : 't-income'}">${p.type === 'expense' ? '支' : '收'}</button>
-      <span class="p-note" title="${esc(p.note)}">${esc(p.note)}</span>
+      <span class="p-note" title="${esc(p.note)}">${p.date && p.date !== S.recordDate ? `<i style="font-style:normal;font-size:.7rem;color:var(--text-3)">${p.date.slice(5)}</i> ` : ''}${esc(p.note)}</span>
       ${catSelect(p.catId, p.type, 'p-cat')}
       <input class="p-amt" type="number" step="0.01" value="${p.amount}">
       <button class="p-del">✕</button>
@@ -1128,6 +1289,10 @@ function renderParseList() {
 function showAcct() { return Store.getAccounts().length > 1; }
 function acctTag(e) {
   if (!showAcct()) return '';
+  // 自动分账没认出账户的：标红提醒（余额暂由现金吸收），点 ✏️ 指定账户后标记消失
+  if (e.unassigned && !e.acctId) {
+    return `<span class="e-acct" style="color:var(--danger);border-color:var(--danger);font-weight:700" title="没认出支付账户，暂记在现金名下，点 ✏️ 指定账户">⚠ 未分账</span>`;
+  }
   const a = e.acctId ? Store.getAccount(e.acctId) : Store.getAccount(Store.DEFAULT_ACCT);
   return a ? `<span class="e-acct">${a.icon || '💼'}${esc(a.name)}</span>` : '';
 }
@@ -1204,6 +1369,68 @@ function bindRecord() {
     render();
     $('#smartText').value = text;
   };
+  /* AI 记账识别开关（在记账页上，勾了截图记账走 AI）：
+     没配置模型时勾选 → 引导去配置并弹回；配置了 → 直接生效。 */
+  const aiSw = $('#aiRecEnable');
+  if (aiSw) aiSw.onchange = async (ev) => {
+    if (ev.target.checked && !AI.ready()) {
+      ev.target.checked = false;
+      const go = await Modal.confirm('AI 记账识别需要先接入模型', {
+        text: '勾选后，截图记账会用 AI 识别账单（比本地识别准很多）。\n先花一分钟接入一个模型（有免费的）：\n\n1. 去「个人中心 → 常规 → AI 模型接入」\n2. 服务商选「智谱 GLM」（glm-4v-flash 免费看图）\n3. 粘上你申请的 API Key，点「测试连接」\n\n数据只发给你自己选的服务商。不配置也能用本地识别。',
+        okText: '去配置 →',
+      });
+      if (go) { S.tab = 'settings'; S.setSub = 'general'; render(); }
+      return;
+    }
+    Store.updateSettings({ ai: { ...Store.getSettings().ai, enabled: ev.target.checked } });
+    toast(ev.target.checked ? '截图记账将使用 AI 识别' : '截图记账将使用本地离线识别');
+    render();   // 刷新截图按钮文案
+  };
+
+  /* 截图记账：选图 → 压缩 → AI（配置且勾选时）或本地离线识别 → 待确认列表。
+     免配置也能用：本地识别不联网、不要密钥；配了 AI 并勾选就自动走 AI（更准）。 */
+  const aiBtn = $('#btnAiShot');
+  if (aiBtn) {
+    const shotStatus = (msg) => { const el = $('#aiShotStatus'); if (el) el.innerHTML = msg; };
+    aiBtn.onclick = () => $('#aiShotFile').click();
+    $('#aiShotFile').onchange = async (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!f) return;
+      aiBtn.disabled = true;
+      const useAI = AI.ready() && Store.getSettings().ai.enabled !== false;
+      try {
+        shotStatus('⏳ 压缩图片…');
+        const dataUrl = await AI.fileToDataUrl(f);
+        let items;
+        if (useAI) {
+          shotStatus('⏳ AI 正在识别截图（多为几秒到半分钟）…');
+          items = await AI.parseImage(dataUrl, todayStr());
+        } else {
+          const text = await OCR.recognize(dataUrl, shotStatus);
+          items = OCR.parseBillText(text, todayStr());
+        }
+        // 归类：AI 给的分类名优先（精确→包含），认不出再按备注关键词
+        const catByName = (name, type) => {
+          if (!name) return null;
+          const cats = Store.getCategories(type);
+          const hit = cats.find(c => c.name === name) || cats.find(c => c.name.includes(name) || name.includes(c.name));
+          return hit ? hit.id : null;
+        };
+        S.parsed = items.map(it => ({
+          ...it,
+          catId: catByName(it.category, it.type) || Store.categorize(it.note, it.type),
+        }));
+        S._smartText = '';
+        toast(`识别出 ${items.length} 笔（${useAI ? 'AI' : '本地'}），请核对后保存`);
+        render();
+      } catch (err) {
+        shotStatus('❌ ' + esc(err.message) + (useAI ? '' : '<br>本地识别对复杂截图有限，可在「个人中心→常规」接入 AI 模型提升效果。'));
+        aiBtn.disabled = false;
+      }
+    };
+  }
+
   const list = $('#parseList');
   if (list) list.addEventListener('click', (ev) => {
     const item = ev.target.closest('.parse-item'); if (!item) return;
@@ -1226,10 +1453,17 @@ function bindRecord() {
   if (saveBtn) saveBtn.onclick = () => {
     const valid = S.parsed.filter(p => p.amount > 0);
     if (!valid.length) { toast('没有有效条目'); return; }
-    const acct = currentRecAcct();
-    Store.addEntries(valid.map(p => ({ date: S.recordDate, type: p.type, amount: p.amount, note: p.note, catId: p.catId, acctId: acct, manual: !!p.manual })));
+    let unassigned = 0;
+    Store.addEntries(valid.map(p => {
+      const r = resolveAcctFor(p.note);
+      if (r.unassigned) unassigned++;
+      // 截图记账解析出的条目自带日期（可能跨好几天），文本解析的用页面上选的日期
+      return { date: p.date || S.recordDate, type: p.type, amount: p.amount, note: p.note, catId: p.catId, acctId: r.acctId, unassigned: r.unassigned, manual: !!p.manual };
+    }));
     S.parsed = []; S._smartText = '';
-    toast(`已保存 ${valid.length} 笔 ✔`);
+    toast(unassigned > 0
+      ? `已保存 ${valid.length} 笔 ✔ 其中 ${unassigned} 笔没认出账户（标了 ⚠），点该笔的 ✏️ 可指定账户`
+      : `已保存 ${valid.length} 笔 ✔`);
     render();
   };
   // 手动
@@ -1243,24 +1477,42 @@ function bindRecord() {
     const amt = parseFloat($('#mAmt').value);
     if (!amt || amt <= 0) { toast('请输入金额'); return; }
     const catId = $('.m-cat').value || null;
-    Store.addEntry({ date: S.recordDate, type: S.manualType, amount: amt, note: $('#mNote').value, catId, acctId: currentRecAcct(), manual: !!catId });
-    toast('已保存 ✔'); render();
+    const r = resolveAcctFor($('#mNote').value);
+    Store.addEntry({ date: S.recordDate, type: S.manualType, amount: amt, note: $('#mNote').value, catId, acctId: r.acctId, unassigned: r.unassigned, manual: !!catId });
+    toast(r.unassigned ? '已保存 ✔ 没认出账户（标了 ⚠），点 ✏️ 可指定' : '已保存 ✔'); render();
   };
   bindEntryOps($('#view'));
 }
 
 /* 条目通用操作（记账页 & 明细页共用） */
 function bindEntryOps(root) {
-  root.addEventListener('click', (ev) => {
+  /* ⚠️ 幂等绑定：#view 是 index.html 里的固定元素，render() 只换它的 innerHTML、
+     元素本身不变。每次 render 后都会调本函数，若直接 addEventListener 就会**层层累积**——
+     用一会儿后点一次删除会同时触发十几个 handler、弹十几个叠加的 Modal，表现为「删不掉 + 卡死」。
+     所以绑之前先摘掉上一次挂的 handler，保证任何时候 root 上只有一个。 */
+  if (root._entryOpsHandler) root.removeEventListener('click', root._entryOpsHandler);
+  /* 把某一行原地换成另一段 HTML，避免整页 render。
+     以前点铅笔展开/取消都 render() 重建整月上百行 —— 桌面/慢机上明显卡顿，
+     严重时点了半天没反应甚至白屏。现在只替换目标行，几乎零延迟。 */
+  const swapRow = (row, html) => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html.trim();
+    const fresh = tmp.firstElementChild;
+    if (fresh) row.replaceWith(fresh);
+    return fresh;
+  };
+  const handler = async (ev) => {
     const row = ev.target.closest('.entry'); if (!row) return;
     const id = row.dataset.id;
     const e = Store.getEntries().find(x => x.id === id); if (!e) return;
     if (ev.target.classList.contains('op-del')) {
-      if (confirm('删除这笔记录？\n' + (e.note || '') + ' ' + e.amount)) { Store.removeEntry(id); toast('已删除'); render(); }
-    } else if (ev.target.classList.contains('op-edit')) {
-      S.editingId = id; render();
-    } else if (ev.target.classList.contains('chip')) {
-      S.editingId = id; render();
+      const ok = await Modal.confirm('删除这笔记录', {
+        text: `${e.note || '（无备注）'}　${e.type === 'income' ? '+' : '-'}${e.amount}`,
+        danger: true, okText: '删除',
+      });
+      if (ok) { Store.removeEntry(id); toast('已删除'); render(); }
+    } else if (ev.target.classList.contains('op-edit') || ev.target.classList.contains('chip')) {
+      swapRow(row, entryEditor(e));                       // 只展开这一行
     } else if (ev.target.classList.contains('ed-save')) {
       const type = row.querySelector('.ed-inc').classList.contains('on-income') ? 'income' : 'expense';
       const acctSel = row.querySelector('.ed-acct');
@@ -1273,18 +1525,31 @@ function bindEntryOps(root) {
         manual: true,
       };
       if (acctSel) patch.acctId = acctSel.value === Store.DEFAULT_ACCT ? null : acctSel.value;
+      patch.unassigned = false;   // 用户亲手保存过 = 已确认账户归属，清掉「未分账」红标
       Store.updateEntry(id, patch);
-      S.editingId = null; toast('已更新 ✔'); render();
+      toast('已更新 ✔');
+      // 日期/金额/分类变了会影响当日小计与筛选，整页 render 一次最稳（保存是低频操作）
+      render();
     } else if (ev.target.classList.contains('ed-cancel')) {
-      S.editingId = null; render();
-    } else if (ev.target.classList.contains('ed-exp')) {
-      row.querySelector('.ed-exp').classList.add('on-expense');
-      row.querySelector('.ed-inc').classList.remove('on-income');
-    } else if (ev.target.classList.contains('ed-inc')) {
-      row.querySelector('.ed-inc').classList.add('on-income');
-      row.querySelector('.ed-exp').classList.remove('on-expense');
+      const fresh = Store.getEntries().find(x => x.id === id);
+      swapRow(row, fresh ? entryRow(fresh) : '');         // 只收起这一行
+    } else if (ev.target.classList.contains('ed-exp') || ev.target.classList.contains('ed-inc')) {
+      /* 切换支/收：不再需要先保存。当场把分类下拉换成对应收/支的分类，
+         并按备注自动归个类；金额框也跟着变收/支的颜色，一眼看出加减方向。 */
+      const toIncome = ev.target.classList.contains('ed-inc');
+      row.querySelector('.ed-exp').classList.toggle('on-expense', !toIncome);
+      row.querySelector('.ed-inc').classList.toggle('on-income', toIncome);
+      const newType = toIncome ? 'income' : 'expense';
+      const noteVal = (row.querySelector('.ed-note') || {}).value || e.note || '';
+      const guess = Store.categorize(noteVal, newType);
+      const sel = row.querySelector('.ed-cat');
+      if (sel) sel.outerHTML = catSelect(guess, newType, 'ed-cat');   // 立即换成新类型的分类
+      const amt = row.querySelector('.ed-amt');
+      if (amt) { amt.classList.toggle('amt-income', toIncome); amt.classList.toggle('amt-expense', !toIncome); }
     }
-  });
+  };
+  root._entryOpsHandler = handler;
+  root.addEventListener('click', handler);
 }
 
 /* ============================================================
@@ -1704,7 +1969,7 @@ function bindStats() {
         await saveBlob(`记账图表-${dd1.slice(0, 7)}-${++n}.png`, blob, [{ name: 'PNG 图片', extensions: ['png'] }]);
       }
       toast(`已导出 ${n} 张图表`);
-    } catch (err) { alert('导出图片失败：' + err.message); }
+    } catch (err) { await Modal.alert('导出图片失败', err.message); }
   };
 }
 
@@ -1849,7 +2114,7 @@ function bindCompare() {
       const blob = await Charts.svgToPng(svg, '', 2);
       await saveBlob(`记账对比图-${todayStr()}.png`, blob, [{ name: 'PNG 图片', extensions: ['png'] }]);
       toast('图表已导出');
-    } catch (err) { alert('导出图片失败：' + err.message); }
+    } catch (err) { await Modal.alert('导出图片失败', err.message); }
   };
 
   const years = [...S.cmpYears].sort();
@@ -2062,7 +2327,7 @@ function bindCmpCatAll(years) {
       <div class="m-vals">${years.map((y, i) =>
         `<span class="m-v"><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${YEAR_COLORS[i % YEAR_COLORS.length]};margin-right:3px"></span>${y.slice(2)}: <b>${Charts.fmt(r.sums[i])}</b></span>`).join('')}</div>`;
     const series = years.map((y, i) => ({ name: y + '年', color: YEAR_COLORS[i % YEAR_COLORS.length], values: r.perYear[i] }));
-    card.appendChild(S.cmpMini === 'line' ? Charts.sparkLines(labels, series) : Charts.sparkBars(labels, series));
+    card.appendChild(S.cmpMini === 'line' ? Charts.sparkLines(labels, series, { axis: true }) : Charts.sparkBars(labels, series, { axis: true }));
     // 点卡片 → 单项细看；点分类名 → 直接看明细
     card.onclick = () => { S.cmpCat = r.id; render(); };
     card.querySelector('.m-name').onclick = (e) => {
@@ -2162,6 +2427,17 @@ function viewCategory() {
   </div>`;
 }
 
+/* 常用图标，供分类选择（点一下即换，不用自己去表情面板找） */
+const ICON_CHOICES = [
+  '🍚','🍜','🍻','🛒','🍉','🍪','🧋','☕','🍰','🍗',
+  '🏠','💡','📶','🚇','🚗','🚄','✈️','⛽','🅿️','🚲',
+  '🧺','📦','👕','👟','👜','💄','💇','🧴','🛁','🧻',
+  '💊','🏥','🦷','📚','✏️','🎓','🎮','🎬','🎤','🏀',
+  '📱','💻','🎧','⌚','🔌','🐱','🐶','🌱','🎁','🧧',
+  '💰','💳','🏦','📈','📉','💵','🪙','🤝','🔙','❤️',
+  '👶','🍼','👨‍👩‍👧','🎂','🍭','🏖️','🛠️','🧾','🏷️','⭐',
+];
+
 /* 分类详情抽屉：改名/图标/颜色/关键词 + 最近记录 */
 function catPanel(id) {
   const c = Store.getCat(id);
@@ -2194,6 +2470,11 @@ function catPanel(id) {
       <input class="cp-color narrow" type="color" value="${toHexColor(c.color)}" style="flex:0 0 44px;height:40px;padding:2px;border:1.5px solid var(--line);border-radius:11px;background:var(--card);cursor:pointer">
       <input class="cp-name" type="text" value="${esc(c.name)}" placeholder="分类名称">
       <button class="btn danger small narrow" id="cpDel">删除</button>
+    </div>
+
+    <label class="fld">选择图标（点一下即换，也可在左边框里粘贴任意表情）</label>
+    <div class="icon-pick">
+      ${ICON_CHOICES.map(ic => `<button type="button" class="ic-opt${ic === (c.icon || '') ? ' on' : ''}" data-ic="${ic}">${ic}</button>`).join('')}
     </div>
 
     <label class="fld">往来款属性（用于负债核算）</label>
@@ -2300,6 +2581,17 @@ function bindCategory() {
   panel.querySelector('.cp-name').onchange = ev => save({ name: ev.target.value.trim() || '未命名' });
   panel.querySelector('.cp-icon').onchange = ev => save({ icon: ev.target.value.trim() || '🏷️' });
   panel.querySelector('.cp-color').onchange = ev => save({ color: ev.target.value });
+
+  /* 点选图标：就地更新，不整页 render（否则抽屉会跳回顶部、丢失滚动位置）*/
+  const applyIcon = (icon) => {
+    Store.updateCategory(id, { icon });
+    panel.querySelector('.cp-icon').value = icon;
+    const head = panel.querySelector('.cp-ico'); if (head) head.textContent = icon;
+    $$('.ic-opt', panel).forEach(b => b.classList.toggle('on', b.dataset.ic === icon));
+    const gridBtn = document.querySelector(`.cat-btn[data-cid="${id}"] .cb-ico`);
+    if (gridBtn) gridBtn.textContent = icon;
+  };
+  $$('.ic-opt', panel).forEach(b => b.onclick = () => applyIcon(b.dataset.ic));
   panel.querySelector('.cp-debt').onchange = ev => save({ debt: ev.target.value || undefined });
 
   const addKw = () => {
@@ -2322,6 +2614,22 @@ function bindCategory() {
 /* ============================================================
    数据页
 ============================================================ */
+/* AI 服务商预设：选了自动填接口地址和推荐模型（都可再手改，选「自定义」全手填） */
+const AI_PROVIDERS = [
+  { id: 'zhipu',    name: '智谱 GLM（glm-4v-flash 免费看图）', url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-flash' },
+  { id: 'qwen',     name: '通义千问（阿里）',                   url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-vl-plus' },
+  { id: 'moonshot', name: 'Kimi（月之暗面）',                   url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k-vision-preview' },
+  { id: 'deepseek', name: 'DeepSeek（暂无看图模型）',           url: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  { id: 'openai',   name: 'OpenAI',                             url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { id: 'custom',   name: '自定义（任何 OpenAI 兼容接口）',     url: '', model: '' },
+];
+function aiProviderOf(ai) {
+  const saved = (ai || {}).provider;
+  if (saved && AI_PROVIDERS.some(p => p.id === saved)) return saved;
+  const hit = AI_PROVIDERS.find(p => p.url && (ai || {}).url === p.url);
+  return hit ? hit.id : ((ai || {}).url ? 'custom' : 'zhipu');
+}
+
 function viewData() {
   const n = Store.getEntries().length;
   const kb = (Store.storageSize() / 1024).toFixed(1);
@@ -2345,6 +2653,7 @@ function viewData() {
     <button class="btn ghost block" id="goAccounts" style="margin-top:10px">去「账户」页管理 →</button>
   </div>
 
+  <div class="card-cols">
   <div class="card">
     <h3>🎨 主题配色</h3>
     <div class="sub">换个心情，所有页面和图表跟着变</div>
@@ -2355,6 +2664,30 @@ function viewData() {
           <div class="t-name">${t.name}</div>
         </div>`).join('')}
     </div>
+  </div>
+
+  <div class="card">
+    <h3>🤖 AI 模型接入（可选）</h3>
+    <div class="sub">配好后「📷 截图记账」更聪明：账单截图直接变记账条目。<br>
+      <b>不填 = 完全不联网</b>；填了也只发给你自己选的服务商。截图识别要用<b>支持看图的模型</b>。</div>
+    <label class="fld">服务商</label>
+    <select id="aiProvider">
+      ${AI_PROVIDERS.map(p => `<option value="${p.id}" ${aiProviderOf(st.ai) === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+    </select>
+    <label class="fld">接口地址</label>
+    <input type="text" id="aiUrl" value="${esc((st.ai || {}).url || '')}" placeholder="选服务商自动填，或自定义">
+    <label class="fld">模型 ID</label>
+    <input type="text" id="aiModel" value="${esc((st.ai || {}).model || '')}" placeholder="例：glm-4v-flash（免费看图）">
+    <label class="fld">API Key（密钥）</label>
+    <input type="password" id="aiKey" value="${esc((st.ai || {}).key || '')}" placeholder="在服务商后台申请，粘到这里">
+    <div class="sub" style="margin:8px 0 0">配置好后，去「记账」页勾选标题旁的「AI 记账识别」即可启用；不勾则用本地离线识别。</div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap">
+      <button class="btn small" id="aiSave">保存</button>
+      <button class="btn ghost small" id="aiTest">测试连接</button>
+      <button class="btn ghost small danger" id="aiClear">清除</button>
+    </div>
+    <div class="sub" id="aiStatus" style="margin:8px 0 0">${AI.ready() ? '✅ 已配置。记账页的「📷 截图记账」已启用 AI。' : '未配置（不影响其他功能）'}</div>
+  </div>
   </div>
 
   <div class="card">
@@ -2392,6 +2725,7 @@ function viewData() {
     <div id="bkList"><div class="sub" style="margin:0">读取中…</div></div>
   </div>
 
+  <div class="card-cols">
   <div class="card">
     <h3>⬇️ 导出</h3>
     <div class="sub">表格（Excel）含明细、月度汇总、分类汇总、年度对比 4 张工作表；图谱会把「统计 / 对比」页的图表存成图片</div>
@@ -2410,10 +2744,11 @@ function viewData() {
 
   <div class="card">
     <h3>⬆️ 导入</h3>
-    <div class="sub">两种表格都能直接吃，选文件就行，会自动认格式：
+    <div class="sub">选文件就行，会自动认格式：
       <br>① <b>你原来的手写账单</b>（每月一张表、一行一天「1号：早餐 3，地铁 4」、带「支出合计」列）—— 自动逐日拆分归类
-      <br>② <b>本 APP 导出的表格</b>（有「日期、类型、分类、金额、备注」列，顺序不限）
-      <br>另外也支持 CSV 和 JSON 备份。</div>
+      <br>② <b>本 APP 导出的表格</b>（日期/类型/分类/金额/备注，顺序不限）
+      <br>③ <b>其他记账 App 导出的表</b>（鲨鱼 / 喵喵 / 小贝 / 随手记等）—— 自动认出日期、金额、收支、分类、备注各在哪一列，导入前会让你确认
+      <br>另外也支持 CSV 和 JSON 备份。已导入过的记录会自动跳过，可放心重复导入。</div>
     <div class="row" style="flex-wrap:wrap">
       <select id="impMode" style="flex:1 1 160px">
         <option value="merge">合并（保留现有记录）</option>
@@ -2423,7 +2758,9 @@ function viewData() {
     </div>
     <input type="file" id="impFile" accept=".json,.csv,.xlsx" hidden>
   </div>
+  </div>
 
+  <div class="card-cols">
   <div class="card">
     <h3>📦 当前数据</h3>
     <div class="sub" style="margin-bottom:0">共 ${n} 笔记录，占用约 ${kb} KB${years.length ? '，覆盖年份：' + years.join('、') : ''}</div>
@@ -2432,6 +2769,7 @@ function viewData() {
   <div class="card">
     <h3>⚠️ 清空</h3>
     <button class="btn danger" id="btnClear">清空全部数据</button>
+  </div>
   </div>`;
 }
 
@@ -2660,17 +2998,19 @@ function importRawBill(sheets, year, mode) {
 /* 打开一个 xlsx：自动判断是「本 APP 导出的标准表」还是「原始账单」 */
 async function importXlsxFile(file, mode) {
   const sheets = await XLSX.parseAll(await file.arrayBuffer());
-  // 标准格式：任意一张表里有「日期」表头
-  const std = sheets.find(sh => (sh.rows.slice(0, 10)).some(r => (r || []).some(c => /^\s*日期\s*$/.test(String(c || '')))));
   const rawSheets = sheets.filter(sh => sheetMonth(sh.name) && looksLikeRawBill(sh.rows));
 
-  if (std && !rawSheets.length) {
-    const res = importTable(std.rows, mode);
-    toast(`导入完成：新增 ${res.added} 笔${res.bad ? `，跳过 ${res.bad} 行` : ''}`);
-    return;
-  }
+  // 不是「按月分表的原始账单」→ 走智能认列，能吃各家记账软件导出的表
   if (!rawSheets.length) {
-    throw new Error('这个表格既不是本 APP 导出的格式（需要有「日期」列），\n也不像按月分表的原始账单（需要有「支出合计」列和「N号：」这样的行）。');
+    // 选行数最多的那张表来解析
+    const best = sheets.slice().sort((a, b) => (b.rows ? b.rows.length : 0) - (a.rows ? a.rows.length : 0))[0];
+    if (!best || !best.rows || !best.rows.length) throw new Error('这个工作簿是空的，没读到数据。');
+    const res = await importTable(best.rows, mode);
+    if (res.cancelled) return;
+    toast(`导入完成：新增 ${res.added} 笔`
+      + (res.dup ? `，跳过重复 ${res.dup} 笔` : '')
+      + (res.bad ? `，忽略无效 ${res.bad} 行` : ''));
+    return;
   }
 
   // 原始账单：确定年份
@@ -2698,46 +3038,135 @@ async function importXlsxFile(file, mode) {
     + (res.skipped ? `\n跳过已有记录的 ${res.skipped} 天` : ''));
 }
 
-/* 从二维表格数据导入（CSV / XLSX 共用） */
-function importTable(rows, mode) {
-  if (!rows.length) throw new Error('表格是空的');
-  // 找表头行（前 10 行内找带「日期」的那行，容忍表格上面有标题）
-  let hi = -1;
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    if ((rows[i] || []).some(c => /^\s*日期\s*$/.test(String(c || '')))) { hi = i; break; }
-  }
-  if (hi < 0) throw new Error('没找到表头，需要包含「日期」列');
-  const head = rows[hi].map(c => String(c || '').trim());
-  const idx = (...names) => {
-    for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; }
+/* 把一格转成 YYYY-MM-DD；认不出返回 '' */
+function toDateStr(v) {
+  if (v instanceof Date) return `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`;
+  let s = String(v == null ? '' : v).trim();
+  // 「2026/1/5 12:30」「2026.01.05」「2026年1月5日」都能吃
+  s = s.replace(/[年月]/g, '-').replace(/日/g, '').replace(/[/.]/g, '-');
+  const m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  return m ? `${m[1]}-${pad2(+m[2])}-${pad2(+m[3])}` : '';
+}
+function toAmount(v) {
+  const n = parseFloat(String(v == null ? '' : v).replace(/[,，¥￥$\s元]/g, ''));
+  return isFinite(n) ? n : NaN;
+}
+
+/* 智能认列：不管表头叫什么（鲨鱼/喵喵/小贝/随手记等各家都不同），
+   靠「表头关键词 + 抽样看列内容」认出 日期/金额/收支/分类/备注/账户 各是哪一列。 */
+function detectColumns(head, dataRows) {
+  const H = head.map(h => String(h || '').trim().toLowerCase());
+  const sample = dataRows.slice(0, Math.min(dataRows.length, 30));
+  const col = (i) => sample.map(r => (r || [])[i]);
+  const findByName = (kws, exclude = []) => {
+    for (let i = 0; i < H.length; i++) {
+      if (exclude.includes(i)) continue;
+      if (kws.some(k => H[i].includes(k))) return i;
+    }
     return -1;
   };
-  const iDate = idx('日期'), iType = idx('类型'), iCat = idx('分类'), iAmt = idx('金额'), iNote = idx('备注');
-  if (iDate < 0 || iAmt < 0) throw new Error('表头必须至少包含「日期」和「金额」两列');
+  const ratio = (i, test) => { const c = col(i).filter(x => String(x ?? '').trim()); return c.length ? c.filter(test).length / c.length : 0; };
+
+  // 日期列：先按名字，认不出再按「多数格子像日期」
+  let iDate = findByName(['日期', '时间', 'date', '交易时间', '记账时间', '账单时间', '消费时间']);
+  if (iDate < 0) for (let i = 0; i < H.length; i++) if (ratio(i, x => toDateStr(x)) > 0.6) { iDate = i; break; }
+
+  // 收支类型列：名字含收支/类型/方向，且值多为 收/支/income/expense
+  let iType = -1;
+  for (const cand of [findByName(['收支', '收入支出', '类型', 'type', '方向', '收/支']), ...H.map((_, i) => i)]) {
+    if (cand < 0 || cand === iDate) continue;
+    if (ratio(cand, x => /^(收入?|支出?|income|expense|inc|exp|\+|-)$/i.test(String(x).trim())) > 0.6) { iType = cand; break; }
+  }
+
+  // 先判断是不是「收入、支出分成两列」（随手记等）。分列存在时就不再另找单金额列，
+  // 否则内容猜测会把「收入」这类分列误当成唯一金额列。
+  let iIncome = findByName(['收入金额', '收入', '入账'], [iDate, iType]);
+  let iExpense = findByName(['支出金额', '支出', '出账'], [iDate, iType, iIncome]);
+  let iAmt = -1;
+  if (!(iIncome >= 0 && iExpense >= 0)) {
+    iIncome = -1; iExpense = -1;
+    iAmt = findByName(['金额', '数额', '钱数', 'amount', 'money', '价格', '消费金额', '收支金额', '发生额'], [iDate, iType]);
+    if (iAmt < 0) for (let i = 0; i < H.length; i++) if (i !== iDate && i !== iType && ratio(i, x => !isNaN(toAmount(x)) && String(x).trim() !== '') > 0.7) { iAmt = i; break; }
+  }
+
+  const used = [iDate, iType, iAmt, iIncome, iExpense];
+  const iCat = findByName(['分类', '类别', '类目', 'category', '账目', '一级分类', '子分类', '标签'], used);
+  const iNote = findByName(['备注', '说明', '描述', 'note', 'remark', '摘要', '商品', '交易对方', '对方', '内容', '事项'], [...used, iCat]);
+  const iAcct = findByName(['账户', '账户名', '支付方式', 'account', '钱包', '资产'], [...used, iCat, iNote]);
+  return { iDate, iAmt, iType, iCat, iNote, iAcct, iIncome, iExpense };
+}
+
+/* 从二维表格数据导入（CSV / XLSX 共用）。智能认列，能吃各家记账软件导出的表。 */
+async function importTable(rows, mode, opts = {}) {
+  if (!rows.length) throw new Error('表格是空的');
+  // 找表头行：前 12 行里，选「非空格子最多」的一行当表头（容忍上方有标题/说明）
+  let hi = 0, best = -1;
+  for (let i = 0; i < Math.min(rows.length, 12); i++) {
+    const cells = (rows[i] || []).filter(c => String(c ?? '').trim()).length;
+    const looksHead = (rows[i] || []).some(c => /日期|时间|金额|收支|类型|分类|备注|date|amount/i.test(String(c || '')));
+    const score = cells + (looksHead ? 100 : 0);
+    if (score > best) { best = score; hi = i; }
+  }
+  const head = (rows[hi] || []).map(c => String(c || '').trim());
+  const dataRows = rows.slice(hi + 1);
+  const C = detectColumns(head, dataRows);
+  if (C.iDate < 0 || (C.iAmt < 0 && C.iIncome < 0 && C.iExpense < 0)) {
+    throw new Error('没认出「日期」和「金额」列。\n请确认表格里有日期列，以及金额列（或分开的收入/支出列）。');
+  }
+
+  // 导入前给用户看认列结果，确认无误再导（除非调用方 opts.silent）
+  if (!opts.silent) {
+    const nm = (i) => i >= 0 ? `第 ${i + 1} 列「${head[i] || '(空)'}」` : '未识别';
+    const okGo = await Modal.confirm('识别到表格格式', {
+      text: `共 ${dataRows.length} 行数据，识别结果：\n`
+        + `· 日期：${nm(C.iDate)}\n`
+        + `· 金额：${C.iAmt >= 0 ? nm(C.iAmt) : `收入=${nm(C.iIncome)}，支出=${nm(C.iExpense)}`}\n`
+        + `· 收支类型：${nm(C.iType)}\n`
+        + `· 分类：${nm(C.iCat)}\n`
+        + `· 备注：${nm(C.iNote)}\n\n`
+        + '没有分类的会按备注自动归类；已有记录的日期不会重复。',
+      okText: '确认导入',
+    });
+    if (!okGo) return { added: 0, bad: 0, cancelled: true };
+  }
 
   const catByName = new Map(Store.getCategories().map(c => [c.name, c]));
+  // 单金额列、又没有收支列时：若该列出现过负数，说明用正负区分收支（负=支出，正=收入）；
+  // 若全是非负数，则默认都是支出（多数导出把支出记成正数）。
+  const signedAmt = C.iAmt >= 0 && C.iType < 0 && dataRows.some(r => toAmount((r || [])[C.iAmt]) < 0);
   const batch = [];
   let bad = 0;
-  for (let i = hi + 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r || !r.length) continue;
-    let date = r[iDate];
-    if (date instanceof Date) date = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-    date = String(date == null ? '' : date).trim().replace(/[/.]/g, '-');
-    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(date);
-    if (!m) { if (String(r[iDate] || '').trim()) bad++; continue; }
-    date = `${m[1]}-${pad2(+m[2])}-${pad2(+m[3])}`;
-    const amt = Math.abs(parseFloat(String(r[iAmt]).replace(/[,，¥\s]/g, '')));
+  for (const r of dataRows) {
+    if (!r || !r.some(c => String(c ?? '').trim())) continue;
+    const date = toDateStr(r[C.iDate]);
+    if (!date) { if (String(r[C.iDate] ?? '').trim()) bad++; continue; }
+
+    // 定金额与收支
+    let amt, type;
+    if (C.iAmt >= 0) {
+      const raw = toAmount(r[C.iAmt]);
+      if (isNaN(raw)) { bad++; continue; }
+      const typeStr = C.iType >= 0 ? String(r[C.iType] || '').trim() : '';
+      if (typeStr) type = /收|入|income|inc|\+/i.test(typeStr) ? 'income' : 'expense';
+      else if (signedAmt) type = raw < 0 ? 'expense' : 'income';
+      else type = 'expense';
+      amt = Math.abs(raw);
+    } else {
+      const inc = C.iIncome >= 0 ? toAmount(r[C.iIncome]) : NaN;
+      const exp = C.iExpense >= 0 ? toAmount(r[C.iExpense]) : NaN;
+      if (!isNaN(inc) && inc > 0) { amt = inc; type = 'income'; }
+      else if (!isNaN(exp) && exp > 0) { amt = exp; type = 'expense'; }
+      else { bad++; continue; }
+    }
     if (!amt || !isFinite(amt)) { bad++; continue; }
-    const typeStr = iType >= 0 ? String(r[iType] || '').trim() : '';
-    const type = /收|入账|进账|\+/.test(typeStr) ? 'income' : 'expense';
-    const note = iNote >= 0 ? String(r[iNote] == null ? '' : r[iNote]).trim() : '';
-    const catStr = iCat >= 0 ? String(r[iCat] || '').trim() : '';
+
+    const note = C.iNote >= 0 ? String(r[C.iNote] ?? '').trim() : '';
+    const catStr = C.iCat >= 0 ? String(r[C.iCat] || '').trim() : '';
     let catId;
     if (catStr && catStr !== '未知' && catByName.has(catStr)) {
       const c = catByName.get(catStr);
       catId = c.type === type ? c.id : Store.categorize(note, type);
-    } else if (catStr && catStr !== '未知') {
+    } else if (catStr && catStr !== '未知' && catStr.length <= 8) {
       const c = Store.addCategory(type, catStr);   // 表里有新分类就自动建
       catByName.set(catStr, c);
       catId = c.id;
@@ -2746,10 +3175,14 @@ function importTable(rows, mode) {
     }
     batch.push({ date, type, amount: amt, note, catId, manual: !!catStr && catStr !== '未知' });
   }
-  if (!batch.length) throw new Error('没有解析到有效数据行');
+  if (!batch.length) throw new Error('没有解析到有效数据行（认出了列，但每行都缺日期或金额）');
   if (mode === 'replace') Store.clearAll();
-  for (let i = 0; i < batch.length; i += 500) Store.addEntries(batch.slice(i, i + 500));
-  return { added: batch.length, bad };
+  // 跳过已存在（同日期+金额+备注）的记录，可放心重复导入
+  const seen = new Set(Store.getEntries().map(e => `${e.date}|${e.amount}|${e.note}`));
+  const fresh = batch.filter(b => { const k = `${b.date}|${b.amount}|${b.note}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  const dup = batch.length - fresh.length;
+  for (let i = 0; i < fresh.length; i += 500) Store.addEntries(fresh.slice(i, i + 500));
+  return { added: fresh.length, bad, dup };
 }
 
 function parseCsv(text) {
@@ -2777,6 +3210,48 @@ function bindData() {
   /* 去账户页（已并入财务管理） */
   const ga = $('#goAccounts');
   if (ga) ga.onclick = () => { S.tab = 'finance'; S.finSub = 'accounts'; render(); };
+
+  /* AI 模型接入（四要素：服务商 / 接口地址 / 模型 ID / 密钥） */
+  const aiSave = $('#aiSave');
+  if (aiSave) {
+    const status = (msg) => { const el = $('#aiStatus'); if (el) el.innerHTML = msg; };
+    const collect = () => ({
+      provider: $('#aiProvider').value,
+      url: $('#aiUrl').value.trim(),
+      key: $('#aiKey').value.trim(),
+      model: $('#aiModel').value.trim(),
+      enabled: (Store.getSettings().ai || {}).enabled !== false,   // 开关在记账页，这里保留原状态
+    });
+    $('#aiProvider').onchange = (ev) => {
+      const p = AI_PROVIDERS.find(x => x.id === ev.target.value);
+      if (!p) return;
+      if (p.id !== 'custom') {
+        $('#aiUrl').value = p.url;
+        if (!$('#aiModel').value.trim() || AI_PROVIDERS.some(x => x.model === $('#aiModel').value.trim())) $('#aiModel').value = p.model;
+      }
+      status(p.id === 'custom' ? '自定义模式：接口地址和模型 ID 都自己填。' : `已填入 ${p.name.split('（')[0]} 的接口地址和推荐模型，粘上密钥即可。`);
+    };
+    aiSave.onclick = () => {
+      Store.updateSettings({ ai: collect() });
+      status(AI.ready() ? '✅ 已保存。建议点「测试连接」确认能通。' : '已保存，但地址/模型/密钥没填全，AI 功能不会启用。');
+      toast('AI 配置已保存');
+    };
+    $('#aiTest').onclick = async () => {
+      // 先把当前输入保存再测，避免「改了没存」测的是旧配置
+      Store.updateSettings({ ai: collect() });
+      if (!AI.ready()) { status('⚠️ 接口地址、模型 ID、密钥三项都要填'); return; }
+      status('⏳ 正在连接模型…');
+      try {
+        const out = await AI.testConn();
+        status(`✅ 连接成功！模型回复：「${esc(out)}」。可以去记账页用「📷 截图记账」了。`);
+      } catch (err) { status('❌ 连接失败：' + esc(err.message)); }
+    };
+    $('#aiClear').onclick = async () => {
+      if (!(await Modal.confirm('清除 AI 配置', { text: '清掉接口地址、密钥和模型名，恢复完全不联网。', okText: '清除', danger: true }))) return;
+      Store.updateSettings({ ai: { provider: '', url: '', key: '', model: '' } });
+      toast('已清除'); render();
+    };
+  }
 
   /* 自动备份设置 */
   const refreshBackupUI = async () => {
@@ -2843,13 +3318,13 @@ function bindData() {
          </div>`
       : '<div class="sub" style="margin:0">还没有备份文件</div>';
     $$('.bk-restore').forEach(b => b.onclick = async () => {
-      if (!confirm(`用备份「${b.dataset.n}」覆盖当前全部数据？\n当前数据会被替换，建议先「立即备份」。`)) return;
+      if (!(await Modal.confirm('恢复备份', { text: `用备份「${b.dataset.n}」覆盖当前全部数据？\n当前数据会被替换，建议先「立即备份」。`, okText: '覆盖恢复', danger: true }))) return;
       try {
         const txt = await Backup.read(b.dataset.n);
         const cnt = Store.importBackup(JSON.parse(txt), 'replace');
         Theme.init();
         toast(`已恢复，共 ${cnt} 笔记录`); render();
-      } catch (err) { alert('恢复失败：' + err.message); }
+      } catch (err) { await Modal.alert('恢复失败', err.message); }
     });
   };
   refreshBackupUI();
@@ -2892,7 +3367,7 @@ function bindData() {
     try {
       const d = await Backup.pickDir();
       if (d) { toast('备份位置已设置'); refreshBackupUI(); }
-    } catch (err) { if (err.name !== 'AbortError') alert('选择失败：' + err.message); }
+    } catch (err) { if (err.name !== 'AbortError') await Modal.alert('选择失败', err.message); }
   };
   const openBtn = $('#bkOpen');
   if (openBtn) openBtn.onclick = () => Backup.openDir();
@@ -2901,7 +3376,7 @@ function bindData() {
       const res = await Backup.run({ interactive: true });
       toast(res.ok ? `备份完成 → ${res.where}` : '备份未完成');
       refreshBackupUI();
-    } catch (err) { alert('备份失败：' + err.message); }
+    } catch (err) { await Modal.alert('备份失败', err.message); }
   };
 
   /* 导出 */
@@ -2910,7 +3385,7 @@ function bindData() {
       const blob = XLSX.build(buildSheets());
       const p = await saveBlob(`生活账单-${todayStr()}.xlsx`, blob, [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]);
       if (p) toast('表格已导出（4 张工作表）');
-    } catch (err) { alert('导出失败：' + err.message); }
+    } catch (err) { await Modal.alert('导出失败', err.message); }
   };
   $('#btnExportCsv').onclick = async () => {
     const rows = buildSheets()[0].rows;
@@ -2935,7 +3410,7 @@ function bindData() {
         n++;
       }
       toast(n ? `已导出 ${n} 张图谱` : '已取消');
-    } catch (err) { alert('导出图谱失败：' + err.message); }
+    } catch (err) { await Modal.alert('导出图谱失败', err.message); }
   };
 
   /* 导入 */
@@ -2958,8 +3433,10 @@ function bindData() {
           toast(`导入完成，现有 ${n} 笔记录`);
         }
       } else if (/\.csv$/i.test(f.name)) {
-        const res = importTable(parseCsv(await f.text()), mode);
-        toast(`导入完成：新增 ${res.added} 笔${res.bad ? `，跳过 ${res.bad} 行无效数据` : ''}`);
+        const res = await importTable(parseCsv(await f.text()), mode);
+        if (!res.cancelled) toast(`导入完成：新增 ${res.added} 笔`
+          + (res.dup ? `，跳过重复 ${res.dup} 笔` : '')
+          + (res.bad ? `，忽略无效 ${res.bad} 行` : ''));
       } else if (/\.xlsx$/i.test(f.name)) {
         await importXlsxFile(f, mode);
       } else {
