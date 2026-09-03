@@ -104,7 +104,8 @@ const Store = (() => {
     lastAcct: '',          // 记账时上次用的账户，方便下次默认选中
     profile: { name: '', phone: '', email: '' },   // 本地个人资料（不是真登录，只作标识）
     totalBudget: 0,        // 每月总预算，0=不设
-    budgets: {},           // 分类月预算 {catId: 金额}
+    budgets: {},           // 分类预算 {catId: 金额}（金额含义由 budgetPeriods 决定）
+    budgetPeriods: {},     // 分类额度周期 {catId: 'year'}，缺省=按月
     savingsGoals: [],      // 存钱计划 [{id,name,target,base,startDate,note}]
     monthlyGoal: 0,        // 每月储蓄目标（收入−支出 要达到多少），0=不设
     license: { code: '', activatedAt: 0 },   // 授权码（电脑/安卓需要）
@@ -855,6 +856,15 @@ const Store = (() => {
     }
     return r2(s);
   }
+  /* 某年某分类累计已花（真实支出，不含借还款）——年额度分类用它对账 */
+  function catYearSpent(year, catId) {
+    let s = 0;
+    for (const e of inYear(String(year))) {
+      if (e.type !== 'expense' || debtKindOf(e)) continue;
+      if ((e.catId || '__unknown__') === (catId || '__unknown__')) s += e.amount;
+    }
+    return r2(s);
+  }
   /* 本月总真实支出（不含借还款/转账）*/
   const monthRealExpense = (ym) => totals(inMonth(ym)).expenseReal;
 
@@ -866,15 +876,23 @@ const Store = (() => {
     if (amount > 0) b[catId] = r2(amount); else delete b[catId];
     updateSettings({ budgets: b });
   }
+  /* 分类额度的周期：默认按月；标了 'year' 的按整年一个额度。
+     金额还是存在 budgets[catId]，含义由周期决定（月额度=每月 X，年额度=整年 X）。 */
+  const getBudgetPeriod = (catId) => ((settings.budgetPeriods || {})[catId] === 'year' ? 'year' : 'month');
+  function setBudgetPeriod(catId, period) {
+    const p = Object.assign({}, settings.budgetPeriods);
+    if (period === 'year') p[catId] = 'year'; else delete p[catId];
+    updateSettings({ budgetPeriods: p });
+  }
   const getTotalBudget = () => settings.totalBudget || 0;
   function setTotalBudget(amount) { updateSettings({ totalBudget: r2(amount || 0) }); }
-  /* 按均值或中位数一键生成各分类预算 */
+  /* 按均值或中位数一键生成各分类预算（年额度分类按 月值×12 生成整年额度）*/
   function autoBudgets(basis) {   // basis: 'avg' | 'median'
     const b = {};
     for (const c of getCategories('expense')) {
       const st = catStat(c.id, 'expense');
       const v = basis === 'median' ? st.median : st.avg;
-      if (v > 0) b[c.id] = r2(v);
+      if (v > 0) b[c.id] = r2(getBudgetPeriod(c.id) === 'year' ? v * 12 : v);
     }
     updateSettings({ budgets: b });
     return Object.keys(b).length;
@@ -898,13 +916,31 @@ const Store = (() => {
 
   /* ---------- 每月储蓄目标：逐月达成情况 + 连续达成 ----------
      某月实际存下 = 真实收入 − 真实支出（剔除借还款，因为借来的钱不算存下的） */
-  const getMonthlyGoal = () => settings.monthlyGoal || 0;
-  function setMonthlyGoal(v) { updateSettings({ monthlyGoal: r2(v || 0) }); }
-  /* 最近 n 个月的达成情况，最新的在前 */
+  /* 每月储蓄目标：现在按【年】分别存（settings.monthlyGoalByYear = {'2025':3000,'2026':4000}）。
+     没为某年单独设时，回退到全局 settings.monthlyGoal（也是老版本升级上来的默认值）。
+     不传 year 时用当前年，兼容旧调用。 */
+  const curYear = () => todayStr().slice(0, 4);
+  function getMonthlyGoal(year) {
+    const y = String(year || curYear());
+    const byYear = settings.monthlyGoalByYear || {};
+    if (Object.prototype.hasOwnProperty.call(byYear, y)) return byYear[y] || 0;
+    return settings.monthlyGoal || 0;   // 兜底：全局值（老数据 / 没单独设过的年份）
+  }
+  function setMonthlyGoal(v, year) {
+    const y = String(year || curYear());
+    if (!settings.monthlyGoalByYear) settings.monthlyGoalByYear = {};
+    settings.monthlyGoalByYear[y] = r2(v || 0);
+    /* 只改这一年 —— 不再同步全局 monthlyGoal，否则「设了 2026 年，2025 年也跟着变」。
+       全局值只作为「从没为哪年单独设过」时的兜底（老版本升级上来的默认）。 */
+    saveJSON(K_SETTINGS, settings);
+  }
+  /* 某年是否单独设过目标（用于 UI 提示「沿用默认」）*/
+  const hasYearGoal = (year) => Object.prototype.hasOwnProperty.call(settings.monthlyGoalByYear || {}, String(year || curYear()));
+  /* 最近 n 个月的达成情况，最新的在前（各月用其所在年份的目标）*/
   function monthlyGoalHistory(n) {
-    const goal = getMonthlyGoal();
     const ms = dataMonths().slice(-(n || 12)).reverse();
     return ms.map(ym => {
+      const goal = getMonthlyGoal(ym.slice(0, 4));
       const t = totals(inMonth(ym));
       const saved = t.balanceReal;
       return { ym, saved, goal, met: goal > 0 && saved >= goal, gap: r2(goal - saved) };
@@ -913,7 +949,7 @@ const Store = (() => {
   /* 某一年的储蓄总览：12 个月各存下多少 + 全年累计（每月「真实收入−真实支出」求和，
      存下的月为正、花超的月为负，加起来就是这一年实际攒下/透支了多少）。 */
   function goalYearSummary(year) {
-    const goal = getMonthlyGoal();
+    const goal = getMonthlyGoal(year);   // 用【该年】自己的目标，而不是当前年的
     const months = [];
     let total = 0;
     for (let m = 1; m <= 12; m++) {
@@ -943,7 +979,7 @@ const Store = (() => {
      以前用全局 goalStreak（从最近月往前数），但界面按年查看时它不随所选年份变、
      最近月一没达标就一直是 0 —— 用户以为数据没更新。改成看所选年份内的最好连续记录。 */
   function goalYearStreak(year) {
-    const goal = getMonthlyGoal();
+    const goal = getMonthlyGoal(year);   // 用【该年】自己的目标
     if (goal <= 0) return 0;
     let run = 0, best = 0;
     for (const m of goalYearSummary(year).months) {
@@ -969,8 +1005,10 @@ const Store = (() => {
     for (const c of getCategories('expense')) {
       const b = getBudget(c.id);
       if (b <= 0) continue;
+      // 年额度分类折成「月标准 = 年额度/12」参与本月的省/超计算
+      const limit = getBudgetPeriod(c.id) === 'year' ? b / 12 : b;
       const sp = catSpent(ym, c.id);
-      if (sp <= b) saved += (b - sp); else over += (sp - b);
+      if (sp <= limit) saved += (limit - sp); else over += (sp - limit);
     }
     return { saved: r2(saved), over: r2(over) };
   }
@@ -1050,9 +1088,9 @@ const Store = (() => {
     addLedger, updateLedger, removeLedger, DEFAULT_LEDGER,
     // 财务管理
     dataMonths, monthsOfYear, periodStats, catMonthlyAmounts, catStat, median, mean, catSpent, monthRealExpense,
-    getBudgets, getBudget, setBudget, getTotalBudget, setTotalBudget, autoBudgets,
+    getBudgets, getBudget, setBudget, getBudgetPeriod, setBudgetPeriod, catYearSpent, getTotalBudget, setTotalBudget, autoBudgets,
     getSavingsGoals, addSavingsGoal, updateSavingsGoal, removeSavingsGoal, goalProgress,
-    getMonthlyGoal, setMonthlyGoal, monthlyGoalHistory, goalYearSummary, setGoalYearAdjust, goalStreak, goalYearStreak, budgetSurplus,
+    getMonthlyGoal, setMonthlyGoal, hasYearGoal, monthlyGoalHistory, goalYearSummary, setGoalYearAdjust, goalStreak, goalYearStreak, budgetSurplus,
     getSettings, updateSettings, getThemes, getTheme, isDirty, markClean,
     exportAll, importBackup, clearAll, resetCategoriesToDefault, storageSize,
   };

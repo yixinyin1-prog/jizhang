@@ -68,7 +68,7 @@ body.native-shell  .topbar { padding-top: max(env(safe-area-inset-top), 28px); }
 }
 .tabbar::-webkit-scrollbar { display: none; }
 .tab {
-  flex: 1 0 auto; border: 0; cursor: pointer;
+  flex: 1 1 0; min-width: 0; border: 0; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 5px;
   padding: 8px 13px; border-radius: 11px;
   background: transparent; color: rgba(255,255,255,.78);
@@ -490,6 +490,60 @@ table.simple tr:last-child td { border-bottom: 0; }
 }
 .subtab.on { background: var(--grad); color: #fff; box-shadow: 0 2px 8px var(--btn-shadow); }
 
+/* ===== 账户中心：导航首页 + 独立模块内页 ===== */
+.center-heading { display: flex; align-items: baseline; gap: 10px; margin: 2px 2px 12px; }
+.center-heading h2 { font-size: 1.12rem; margin: 0; }
+.center-heading span { font-size: .76rem; color: var(--text-3); }
+.center-modules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.center-module {
+  min-width: 0; display: flex; align-items: center; gap: 9px; padding: 11px;
+  border: 1.5px solid var(--line); border-radius: var(--r-md); background: var(--card);
+  color: var(--text); cursor: pointer; text-align: left; box-shadow: var(--shadow-sm);
+  transition: border-color .15s, transform .15s, background .15s;
+}
+.center-module:hover { transform: translateY(-1px); border-color: var(--brand-2); }
+.center-module[data-center-module="ledger"] { grid-column: 1 / -1; }
+.cm-icon { flex: 0 0 32px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: var(--input-bg); font-size: 1.05rem; }
+.cm-text { flex: 1; min-width: 0; }
+.cm-text b { display: block; font-size: .84rem; }
+.cm-text i { display: block; margin-top: 2px; font-size: .67rem; line-height: 1.3; font-style: normal; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-arrow { color: var(--text-3); font-size: 1.2rem; }
+.center-home-info { display: flex; flex-direction: column; gap: 12px; width: 100%; margin-top: 14px; }
+.center-home-info > .card { width: 100%; margin-bottom: 0; }
+.center-inner-head {
+  display: flex; align-items: center; gap: 13px; margin: 2px 0 14px; padding: 12px 13px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+}
+.center-back {
+  flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px 11px;
+  background: var(--input-bg); color: var(--brand-deep); cursor: pointer; font-size: .78rem; font-weight: 700;
+}
+.center-back:hover { border-color: var(--brand-2); background: var(--brand-soft); }
+.center-inner-title { min-width: 0; }
+.center-inner-title h2 { margin: 0; font-size: 1.05rem; }
+.center-inner-title span { display: block; margin-top: 2px; color: var(--text-3); font-size: .72rem; }
+.center-content { min-width: 0; }
+.center-subbar { overflow-x: auto; scrollbar-width: none; }
+.center-subbar .subtab { min-width: max-content; padding-left: 12px; padding-right: 12px; }
+
+/* 钱包和设置仍复用原有、稳定的业务视图，只展示用户选中的面板。 */
+.wallet-assets .wallet-debt-card, .wallet-assets .wallet-opening-card { display: none; }
+.wallet-debt .wallet-hero, .wallet-debt .wallet-reminder, .wallet-debt .wallet-assets-card { display: none; }
+.settings-pane > .card, .settings-pane > .card-cols > .card { display: none; }
+.settings-pane > .card-cols { display: contents; }
+.settings-pane.settings-theme .settings-theme-card,
+.settings-pane.settings-ai .settings-ai-card,
+.settings-pane.settings-backup .settings-backup-card,
+.settings-pane.settings-transfer .settings-export-card,
+.settings-pane.settings-transfer .settings-import-card,
+.settings-pane.settings-transfer .settings-current-card,
+.settings-pane.settings-transfer .settings-clear-card { display: block; }
+
+@media (max-width: 620px) {
+  .center-modules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cm-text i { display: none; }
+}
+
 /* ===== 账户页 ===== */
 .acct-list { display: flex; flex-direction: column; gap: 8px; }
 .acct-row {
@@ -531,7 +585,10 @@ table.simple tr:last-child td { border-bottom: 0; }
 
 /* ===== 联系作者 / 授权 ===== */
 .contact-box { text-align: center; padding: 6px 0; }
-.contact-qr { width: 200px; max-width: 70%; border-radius: 12px; border: 1px solid var(--line); }
+.contact-qr {
+  display: block; width: 200px; max-width: 70%; height: auto; aspect-ratio: 1 / 1;
+  object-fit: contain; margin: 0 auto; border-radius: 12px; border: 1px solid var(--line);
+}
 .contact-fallback { font-size: .8rem; color: var(--text-3); padding: 30px; }
 .contact-tip { margin-top: 10px; font-size: .9rem; font-weight: 700; }
 .contact-tip span { font-size: .76rem; font-weight: 400; color: var(--text-3); }
@@ -621,6 +678,12 @@ body.theme-dark .mg-cell.miss { background: #37201b; }
 .fbud-row .fb-num.over { color: var(--danger); font-weight: 700; }
 .fbud-row .fb-nobudget { font-size: .68rem; color: var(--text-3); margin-top: 3px; }
 .fbud-row .fb-input { flex: 0 0 78px; padding: 6px 8px; font-size: .82rem; text-align: right; border-radius: 8px; }
+/* 月/年额度切换按钮 */
+.fbud-row .fb-period { flex: 0 0 28px; height: 30px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--input-bg); cursor: pointer; font-size: .82rem; font-weight: 700; color: var(--text-2); }
+.fbud-row .fb-period[data-period="year"] { background: color-mix(in srgb, var(--brand) 14%, transparent); border-color: var(--brand); color: var(--brand-deep); }
+/* 额度使用表里的「月/年」小标签 */
+.bud-unit { display: inline-block; min-width: 20px; text-align: center; font-size: .72rem; font-weight: 700; color: var(--text-3); }
+.bud-unit.year { color: var(--brand-deep); background: color-mix(in srgb, var(--brand) 15%, transparent); border-radius: 5px; padding: 1px 5px; }
 .goal-row { padding: 11px 0; border-bottom: 1px solid var(--line); }
 .goal-row:last-of-type { border-bottom: 0; }
 .goal-top { display: flex; align-items: center; gap: 8px; font-size: .86rem; }
@@ -654,6 +717,16 @@ body.theme-dark .mg-cell.miss { background: #37201b; }
 .pk-ma { font-size: .62rem; color: var(--text-3); font-variant-numeric: tabular-nums; margin-top: 1px; }
 .pk-jump { display: flex; gap: 7px; align-items: center; }
 .pk-jump input { flex: 1; }
+.pk-week, .pk-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.pk-week { margin-bottom: 5px; color: var(--text-3); font-size: .68rem; text-align: center; }
+.pk-d { position: relative; min-height: 34px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text); cursor: pointer; font-size: .78rem; }
+.pk-d:hover { border-color: var(--brand-2); }
+.pk-d.on { color: #fff; border-color: transparent; background: var(--grad); font-weight: 700; }
+.pk-d.blank { border: 0; background: transparent; }
+.pk-dot { position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--brand); }
+.pk-d.on .pk-dot { background: #fff; }
+.date-with-ledger { display: flex; gap: 8px; margin-bottom: 10px; }
+.date-with-ledger input { flex: 1; }
 
 /* 明细页里被跳转命中的那一天，高亮一下好找 */
 .day-group.hit .day-head b { color: var(--brand); }
@@ -747,7 +820,7 @@ body.theme-dark .mini-card { background: #232c33; }
   .layout-wide > .col > .card:last-child { margin-bottom: 0; }
   .layout-wide > .col.grow > .card.fill { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .layout-wide > .col.grow > .card.fill > .fill-body { flex: 1; overflow-y: auto; min-height: 0; }
-  .tab { flex: 0 0 auto; padding: 8px 20px; }
+  .tab { flex: 1 1 0; padding: 8px 20px; }
   .hero .h-big { font-size: 2.3rem; }
   .cat-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
 }

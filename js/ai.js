@@ -1,5 +1,5 @@
 /* ===== AI 模型接入（可选） =====
-   用户在「个人中心 → 常规」填自己的 OpenAI 兼容接口（DeepSeek / 通义 / 智谱 / Kimi /
+   用户在「账户中心 → 设置 → AI 模型」填自己的 OpenAI 兼容接口（DeepSeek / 通义 / 智谱 / Kimi /
    OpenAI 等都提供这种接口）。不填就完全不联网；填了也只把数据发给用户自己指定的服务商，
    没有任何中间服务器。主要用途：截图记账（把账单/支付截图直接变成记账条目）。 */
 'use strict';
@@ -31,7 +31,7 @@ const AI = (() => {
   /* 调一次对话接口，返回模型输出的文本 */
   async function chat(messages, { timeout = 90000, maxTokens = 2000 } = {}) {
     const c = cfg();
-    if (!ready()) throw new Error('还没配置 AI 模型。请到「个人中心 → 常规 → AI 模型接入」填接口地址、密钥和模型名。');
+    if (!ready()) throw new Error('还没配置 AI 模型。请到「账户中心 → 设置 → AI 模型」填接口地址、密钥和模型名。');
     let base = String(c.url || '').trim().replace(/\/+$/, '');
     // 用户可能填的是根地址、/v1、或完整 /chat/completions —— 都兜住
     let url;

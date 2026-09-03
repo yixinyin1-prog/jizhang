@@ -39,10 +39,15 @@ function incomeHints() {
 
 /* ---------- 全局状态 ---------- */
 const S = {
-  tab: 'record',              // record | accounts | analysis | settings
+  tab: 'record',              // record | analysis | center
   anaSub: 'detail',           // 数据分析的子页：detail | stats | compare
   setSub: 'general',          // 设置的子页：general | category
   finSub: 'budget',           // 财务管理的子页：budget | goals | accounts
+  centerModule: 'home',       // 账户中心导航页 / 当前独立模块
+  budgetPane: 'overview',     // 预算管理：overview | category | stats
+  savingsPane: 'goals',       // 存钱计划：goals | surplus | plan
+  walletPane: 'assets',       // 钱包：assets | debt
+  settingsPane: 'theme',      // 设置：theme | ai | backup | transfer
   finPeriod: 'month',         // 财务管理看月还是看年
   finAnchor: todayStr(),      // 财务管理当前锚点日期
   finChart: 'bar',            // 中位数/平均数图形态：bar | line
@@ -93,6 +98,7 @@ async function pickPeriod(period, anchor) {
     sel = `${y}-${pad2(m)}-${pad2(Math.min(D(), last))}`;
   };
   const monthSum = (yy, mm) => Store.totals(Store.inMonth(`${yy}-${pad2(mm)}`)).expense;
+  const hasEntries = (date) => Store.byDate(date).length > 0;
 
   const body = document.createElement('div');
   const paint = () => {
@@ -114,11 +120,25 @@ async function pickPeriod(period, anchor) {
           }).join('')}
         </div>
       </div>`;
-    const dayJump = needDay ? `
+    const dayJump = needDay ? (() => {
+      const y = Y(), m = M();
+      const firstWeekday = new Date(y, m - 1, 1).getDay();
+      const last = new Date(y, m, 0).getDate();
+      const cells = Array.from({ length: firstWeekday }, () => '<span class="pk-d blank"></span>');
+      for (let day = 1; day <= last; day++) {
+        const date = `${y}-${pad2(m)}-${pad2(day)}`;
+        cells.push(`<button class="pk-d ${date === sel ? 'on' : ''}" data-date="${date}" title="${hasEntries(date) ? '这一天有记账' : '这一天暂无记账'}">
+          <span>${day}</span>${hasEntries(date) ? '<i class="pk-dot" aria-label="有记账"></i>' : ''}
+        </button>`);
+      }
+      return `
       <div class="pk-sec">
-        <div class="pk-label">${period === 'day' ? '具体哪一天' : '这一周里的任意一天'}</div>
+        <div class="pk-label">${period === 'day' ? '具体哪一天' : '这一周里的任意一天'}（有小点 = 当天有记账）</div>
+        <div class="pk-week"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+        <div class="pk-days">${cells.join('')}</div>
         <div class="pk-jump"><input type="date" class="pk-date" value="${sel}"></div>
-      </div>` : '';
+      </div>`;
+    })() : '';
     body.innerHTML = yearRow + monthGrid + dayJump;
 
     body.querySelectorAll('.pk-y').forEach(b => b.onclick = () => {
@@ -131,6 +151,7 @@ async function pickPeriod(period, anchor) {
       if (period === 'month') body._done(sel);           // 选完月直接跳，少点一次
       else paint();                                      // 日/周：把日期框同步到这个月
     });
+    body.querySelectorAll('.pk-d[data-date]').forEach(b => b.onclick = () => { sel = b.dataset.date; paint(); });
     const di = body.querySelector('.pk-date');
     if (di) di.onchange = () => { if (di.value) { sel = di.value; paint(); } };
   };
@@ -172,21 +193,99 @@ async function renderReminder() {
 
 /* ---------- 主渲染 ---------- */
 function render() {
+  /* 兼容旧入口和旧状态：统一折叠到新的「账户中心」。 */
+  if (S.tab === 'accounts') { S.tab = 'center'; S.centerModule = 'wallet'; S.walletPane = 'assets'; }
+  else if (S.tab === 'finance') {
+    S.tab = 'center';
+    S.centerModule = S.finSub === 'goals' ? 'savings' : S.finSub === 'accounts' ? 'wallet' : 'budget';
+  } else if (S.tab === 'settings') {
+    S.tab = 'center';
+    S.centerModule = S.setSub === 'category' ? 'category' : S.setSub === 'me' ? 'profile' : 'settings';
+  }
   $$('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === S.tab));
   renderReminder();
   renderLedgerChip();
   const v = $('#view');
   switch (S.tab) {
     case 'record': v.innerHTML = viewRecord(); bindRecord(); break;
-    case 'accounts':   // 账户已并入财务管理，老入口重定向过去
-      S.tab = 'finance'; S.finSub = 'accounts';
-      v.innerHTML = viewFinance(); bindFinance(); break;
-    case 'finance': v.innerHTML = viewFinance(); bindFinance(); break;
     case 'analysis': v.innerHTML = viewAnalysis(); bindAnalysis(); break;
-    case 'settings': v.innerHTML = viewSettings(); bindSettings(); break;
+    case 'center': v.innerHTML = viewAccountCenter(); bindAccountCenter(); break;
   }
   const kb = Store.storageSize();
   $('#storageHint').textContent = `${Store.getEntries().length} 笔 · ${(kb / 1024).toFixed(0)}KB`;
+}
+
+/* ---------- 账户中心：按模块进入，避免所有内容一次铺满 ---------- */
+function centerSubbar(items, current, attr) {
+  return `<div class="subtab-bar center-subbar">${items.map(([key, label]) =>
+    `<button class="subtab ${current === key ? 'on' : ''}" ${attr}="${key}">${label}</button>`).join('')}</div>`;
+}
+
+function viewAccountCenter() {
+  const modules = [
+    ['wallet', '👛', '钱包', '资产账户、负债与债权'],
+    ['budget', '🎯', '预算管理', '总预算、分类额度与历史参考'],
+    ['savings', '🐷', '存钱计划', '攒钱目标与月度、年度计划'],
+    ['category', '🏷️', '分类', '管理收支分类与关键词'],
+    ['settings', '⚙️', '设置', '配色、AI、备份与数据迁移'],
+    ['profile', '👤', '个人资料', '仅保存在当前设备'],
+    ['ledger', '📚', '账本管理', '新建、编辑与整理账本'],
+  ];
+  if (S.centerModule === 'home') {
+    return `
+      <div class="center-heading"><h2>账户中心</h2><span>选择一个模块进入独立页面</span></div>
+      <div class="center-modules">
+        ${modules.map(([key, icon, name, hint]) => `<button class="center-module" data-center-module="${key}">
+          <span class="cm-icon">${icon}</span><span class="cm-text"><b>${name}</b><i>${hint}</i></span><span class="cm-arrow">›</span>
+        </button>`).join('')}
+      </div>
+      <div class="center-home-info">${viewMe('license')}${viewMe('contact')}</div>`;
+  }
+
+  let sub = '', content = '';
+  if (S.centerModule === 'category') content = viewCategory();
+  else if (S.centerModule === 'budget') {
+    sub = centerSubbar([['overview', '预算速览'], ['category', '分类额度'], ['stats', '中位数 / 平均数']], S.budgetPane, 'data-budget-pane');
+    content = viewFinBudget(S.budgetPane);
+  } else if (S.centerModule === 'savings') {
+    sub = centerSubbar([['goals', '攒钱目标'], ['surplus', '本月守额度'], ['plan', '月度 & 年度']], S.savingsPane, 'data-savings-pane');
+    content = viewFinGoals(S.savingsPane);
+  } else if (S.centerModule === 'wallet') {
+    sub = centerSubbar([['assets', '我的资产'], ['debt', '负债与债权']], S.walletPane, 'data-wallet-pane');
+    content = viewAccounts(S.walletPane);
+  } else if (S.centerModule === 'settings') {
+    sub = centerSubbar([['theme', '主要配色'], ['ai', 'AI 模型'], ['backup', '自动备份'], ['transfer', '导出 & 导入']], S.settingsPane, 'data-settings-pane');
+    content = viewData(S.settingsPane);
+  } else if (S.centerModule === 'profile') content = viewMe('profile');
+  else if (S.centerModule === 'ledger') content = ledgerManageCard();
+  else { S.centerModule = 'home'; return viewAccountCenter(); }
+
+  const active = modules.find(([key]) => key === S.centerModule) || modules[0];
+
+  return `
+    <div class="center-inner-head">
+      <button class="center-back" id="centerBack" type="button">‹ 返回账户中心</button>
+      <div class="center-inner-title"><h2>${active[1]} ${active[2]}</h2><span>${active[3]}</span></div>
+    </div>
+    <div class="center-content">${sub}${content}</div>`;
+}
+
+function bindAccountCenter() {
+  $$('[data-center-module]').forEach(b => b.onclick = () => { S.centerModule = b.dataset.centerModule; render(); });
+  const back = $('#centerBack');
+  if (back) back.onclick = () => { S.centerModule = 'home'; render(); };
+  if (S.centerModule === 'home') { bindMe(); return; }
+  $$('[data-budget-pane]').forEach(b => b.onclick = () => { S.budgetPane = b.dataset.budgetPane; render(); });
+  $$('[data-savings-pane]').forEach(b => b.onclick = () => { S.savingsPane = b.dataset.savingsPane; render(); });
+  $$('[data-wallet-pane]').forEach(b => b.onclick = () => { S.walletPane = b.dataset.walletPane; render(); });
+  $$('[data-settings-pane]').forEach(b => b.onclick = () => { S.settingsPane = b.dataset.settingsPane; render(); });
+  if (S.centerModule === 'category') bindCategory();
+  else if (S.centerModule === 'budget') bindFinBudget();
+  else if (S.centerModule === 'savings') bindFinGoals();
+  else if (S.centerModule === 'wallet') bindAccounts();
+  else if (S.centerModule === 'settings') bindData();
+  else if (S.centerModule === 'ledger') bindLedgerManage();
+  else bindMe();
 }
 
 /* 顶部账本切换标签 */
@@ -229,10 +328,9 @@ function bindSettings() {
 }
 
 /* ---------- 我的（资料 + 授权 + 联系作者）---------- */
-function viewMe() {
+function viewMe(section = 'all') {
   const p = Store.getSettings().profile || {};
-  const licReq = License.required();
-  return `
+  const profileCard = `
   <div class="card">
     <h3>👤 我的资料</h3>
     <div class="sub">存在本机、不上传，仅作标识用（不是账号登录，换设备靠备份文件迁移）。</div>
@@ -243,18 +341,22 @@ function viewMe() {
     <label class="fld">邮箱（可选）</label>
     <input type="text" id="pfEmail" value="${esc(p.email || '')}" placeholder="仅本机保存" inputmode="email">
     <button class="btn block" id="pfSave">保存资料</button>
-  </div>
-
+  </div>`;
+  const licenseCard = `
   <div class="card" id="licenseCard">
     <h3>🔑 授权状态</h3>
     <div id="licBody"><div class="sub" style="margin:0">读取中…</div></div>
-  </div>
-
+  </div>`;
+  const contactCard = `
   <div class="card">
-    <h3>📮 联系作者</h3>
+    <h3>📮 联系开发者</h3>
     <div class="sub">授权获取使用权限、程序优化建议、问题反馈，都欢迎联系。</div>
     ${contactBoxHtml()}
   </div>`;
+  if (section === 'profile') return profileCard;
+  if (section === 'license') return licenseCard;
+  if (section === 'contact') return contactCard;
+  return profileCard + licenseCard + contactCard;
 }
 
 /* 联系作者二维码区（个人中心 和 授权闸门 共用） */
@@ -266,7 +368,7 @@ function contactBoxHtml() {
       <div class="contact-fallback" style="display:none">还没放二维码图片<br>
         <span style="font-size:.72rem">把作者微信二维码存成 icons/creator-qr.png 就会显示在这里</span>
       </div>
-      <div class="contact-tip">微信扫码添加作者<br><span>获取授权码 · 提优化建议 · 反馈问题</span></div>
+    <div class="contact-tip">微信扫码联系开发者<br><span>获取授权码 · 提优化建议 · 反馈问题</span></div>
     </div>`;
 }
 
@@ -274,15 +376,16 @@ function contactBoxHtml() {
 async function openContactModal() {
   const body = document.createElement('div');
   body.innerHTML = contactBoxHtml();
-  await Modal.open({ title: '📮 联系作者', body, showCancel: false, okText: '关闭', getValue: () => true });
+  await Modal.open({ title: '📮 联系开发者', body, showCancel: false, okText: '关闭', getValue: () => true });
 }
 
 function bindMe() {
-  $('#pfSave').onclick = () => {
-    Store.updateSettings({ profile: { name: $('#pfName').value.trim(), phone: $('#pfPhone').value.trim(), email: $('#pfEmail').value.trim() } });
-    toast('资料已保存');
-  };
-  renderLicenseBox();
+  const save = $('#pfSave');
+  if (save) save.onclick = () => {
+      Store.updateSettings({ profile: { name: $('#pfName').value.trim(), phone: $('#pfPhone').value.trim(), email: $('#pfEmail').value.trim() } });
+      toast('资料已保存');
+    };
+  if ($('#licBody')) renderLicenseBox();
 }
 
 async function renderLicenseBox() {
@@ -498,7 +601,7 @@ function bindFinance() {
 /* ============================================================
    财务管理 · 子页1：预算与统计
 ============================================================ */
-function viewFinBudget() {
+function viewFinBudget(pane = 'all') {
   const R = finRange();
   const isMonth = S.finPeriod === 'month';
   const ps = Store.periodStats(R.months);
@@ -594,25 +697,32 @@ function viewFinBudget() {
       </div>
     </div>`;
 
-  /* ---- 分类预算 vs 花销（额度使用对比）---- */
+  /* ---- 分类预算 vs 花销（额度使用对比，支持月/年两种额度）---- */
   const expCats = Store.getCategories('expense');
   const budRows = expCats.map(c => {
+    const period = Store.getBudgetPeriod(c.id);   // 'month' | 'year'
     const b = Store.getBudget(c.id);
-    // 月视图比当月；年视图比「这一年月均」
-    const sp = isMonth ? Store.catSpent(R.ym, c.id) : Store.catStat(c.id, 'expense', R.months).avg;
-    return { c, b, sp };
+    let sp;
+    if (period === 'year') {
+      sp = Store.catYearSpent(R.year, c.id);      // 年额度：比这一年累计已花
+    } else {
+      sp = isMonth ? Store.catSpent(R.ym, c.id) : Store.catStat(c.id, 'expense', R.months).avg;
+    }
+    return { c, b, sp, period };
   }).filter(r => r.b > 0 || r.sp > 0).sort((a, b) => (b.sp || b.b) - (a.sp || a.b));
 
+  const spentHead = isMonth ? '已花' : '花销';
   const catBudgetCard = `
   <div class="card">
     <h3>📊 分类额度使用
       <span style="float:right"><button class="btn ghost small" id="finAuto">按历史生成额度</button></span>
     </h3>
-    <div class="sub">额度就是「每月标准」，可手动改。${isMonth ? '下面比的是本月实际花销。' : '年视图下比的是这一年的<b>月均</b>花销。'}
-      点「按历史生成额度」可用中位数/平均数一键填好。</div>
+    <div class="sub">每个分类可选<b>按月</b>或<b>按年</b>设额度（车险、旅游这类适合按年）。
+      月额度比${isMonth ? '本月花销' : '这一年月均花销'}；年额度比 <b>${R.year} 年累计花销</b>。
+      点「按历史生成额度」可一键填好。</div>
     ${budRows.length ? `
       <div class="table-scroll" style="margin-bottom:6px">
-        <table class="simple"><thead><tr><th>分类</th><th>${isMonth ? '本月已花' : '月均花销'}</th><th>月额度</th><th>用了</th><th>差额</th></tr></thead>
+        <table class="simple"><thead><tr><th>分类</th><th>周期</th><th>${spentHead}</th><th>额度</th><th>用了</th><th>差额</th></tr></thead>
         <tbody>
           ${budRows.map(r => {
             const has = r.b > 0;
@@ -621,6 +731,7 @@ function viewFinBudget() {
             const over = has && r.sp > r.b;
             return `<tr>
               <td>${r.c.icon || ''} ${esc(r.c.name)}</td>
+              <td><span class="bud-unit ${r.period === 'year' ? 'year' : ''}">${r.period === 'year' ? '年' : '月'}</span></td>
               <td style="${over ? 'color:var(--danger);font-weight:700' : ''}">${fmtM(r.sp)}</td>
               <td>${has ? fmtM(r.b) : '—'}</td>
               <td style="${over ? 'color:var(--danger);font-weight:700' : ''}">${usePct === null ? '—' : usePct + '%'}</td>
@@ -636,7 +747,8 @@ function viewFinBudget() {
             <span class="fb-name">${esc(r.c.name)} <span class="fb-num ${r.b > 0 && r.sp > r.b ? 'over' : ''}">${fmtM(r.sp)}${r.b > 0 ? ` / ${fmtM(r.b)}` : ''}</span></span>
             ${r.b > 0 ? `<div class="bar-bg" style="margin-top:4px"><div class="bar-fg" style="width:${Math.min(100, r.sp / r.b * 100)}%;background:${r.sp > r.b ? 'var(--danger)' : r.c.color}"></div></div>` : '<div class="fb-nobudget">未设额度</div>'}
           </span>
-          <input class="fb-input" type="number" value="${r.b || ''}" placeholder="额度" step="1">
+          <button class="fb-period" data-cid="${r.c.id}" data-period="${r.period}" title="切换月/年额度">${r.period === 'year' ? '年' : '月'}</button>
+          <input class="fb-input" type="number" value="${r.b || ''}" placeholder="${r.period === 'year' ? '年额度' : '月额度'}" step="1">
         </div>`).join('')}
     ` : '<div class="empty" style="padding:20px 0">这个时段没有支出记录</div>'}
   </div>`;
@@ -672,6 +784,9 @@ function viewFinBudget() {
       </div>` : '<div class="empty" style="padding:20px 0">这个时段没有支出记录</div>'}
   </div>`;
 
+  if (pane === 'overview') return nav + budgetCard + overviewCard;
+  if (pane === 'category') return nav + catBudgetCard;
+  if (pane === 'stats') return nav + statCard;
   return nav + budgetCard + overviewCard + catBudgetCard + statCard;
 }
 
@@ -767,6 +882,13 @@ function bindFinBudget() {
   $$('.fbud-row').forEach(row => {
     const inp = row.querySelector('.fb-input');
     inp.onchange = () => { Store.setBudget(row.dataset.cid, parseFloat(inp.value) || 0); render(); };
+    const pb = row.querySelector('.fb-period');
+    if (pb) pb.onclick = () => {
+      const next = pb.dataset.period === 'year' ? 'month' : 'year';
+      Store.setBudgetPeriod(row.dataset.cid, next);
+      toast(next === 'year' ? '已改为按年额度' : '已改为按月额度');
+      render();
+    };
   });
 
   /* ---- 图表 ---- */
@@ -807,14 +929,15 @@ function bindFinBudget() {
 /* ============================================================
    财务管理 · 子页2：存钱计划（+ 账本管理）
 ============================================================ */
-function viewFinGoals() {
-  const goal = Store.getMonthlyGoal();
+function viewFinGoals(pane = 'all') {
   const thisMonth = todayStr().slice(0, 7);
   const surplus = Store.budgetSurplus(thisMonth);
 
   // 可选年份：有数据的年 + 今年，确保今年也能选
   const years = Array.from(new Set([...Store.years(), todayStr().slice(0, 4)])).sort();
   if (!years.includes(S.goalYear)) S.goalYear = years[years.length - 1];
+  const goal = Store.getMonthlyGoal(S.goalYear);       // 用【所选年份】的目标（每年可独立）
+  const goalIsInherited = goal > 0 && !Store.hasYearGoal(S.goalYear);   // 沿用默认、还没为这年单独设过
   const yr = Store.goalYearSummary(S.goalYear);
   const streak = Store.goalYearStreak(S.goalYear);   // 所选年份内的最长连续达成
   const cur = yr.months.find(h => h.ym === thisMonth);
@@ -862,11 +985,12 @@ function viewFinGoals() {
         : `<div class="ach-banner warn">⚠️ 本月还差 <b>${fmtM(cur.gap)}</b> 才够目标（目前存下 ${fmtM(cur.saved)}）</div>`) : ''}
     ` : ''}
 
-    <label class="fld">每月储蓄目标（存钱标准线，可随时调）</label>
+    <label class="fld">${S.goalYear} 年每月储蓄目标（每年可单独设，存钱标准线随时调）</label>
     <div class="row">
-      <input type="number" id="mgInput" value="${goal || ''}" placeholder="每月想存多少" step="100">
+      <input type="number" id="mgInput" value="${goal || ''}" placeholder="${S.goalYear} 年每月想存多少" step="100">
       <button class="btn small narrow" id="mgSave">保存</button>
     </div>
+    ${goalIsInherited ? `<div class="sub" style="margin:6px 0 0">当前沿用默认 ${fmtM(goal)}，还没为 ${S.goalYear} 年单独设过。点「保存」即固定为这一年的目标。</div>` : ''}
 
     ${goal > 0 ? `
       <label class="fld">${S.goalYear} 年各月：✅ 达标 · ⚠️ 存了但没够 · ❌ 入不敷出</label>
@@ -928,15 +1052,20 @@ function viewFinGoals() {
     <button class="btn ghost block" id="finAddGoal">＋ 新建攒钱目标</button>
   </div>`;
 
-  return monthlyCard + budgetCard + goalCard + ledgerManageCard();
+  if (pane === 'goals') return goalCard;
+  if (pane === 'surplus') return budgetCard;
+  if (pane === 'plan') return monthlyCard;
+  return monthlyCard + budgetCard + goalCard;
 }
 
 function bindFinGoals() {
-  $('#mgSave').onclick = () => { Store.setMonthlyGoal(parseFloat($('#mgInput').value) || 0); toast('每月储蓄目标已更新'); render(); };
+  const mgSave = $('#mgSave');
+  if (mgSave) mgSave.onclick = () => { Store.setMonthlyGoal(parseFloat($('#mgInput').value) || 0, S.goalYear); toast(`${S.goalYear} 年每月目标已更新`); render(); };
   $$('.pill.yr[data-gy]').forEach(b => b.onclick = () => { S.goalYear = b.dataset.gy; render(); });
 
   /* 校准某年「累计存下」：记账算的和实际存款对不上时手动修正（不改任何记账记录） */
-  $('#mgCalib').onclick = async () => {
+  const mgCalib = $('#mgCalib');
+  if (mgCalib) mgCalib.onclick = async () => {
     const yr = Store.goalYearSummary(S.goalYear);
     const val = await Modal.prompt(`校准 ${S.goalYear} 年实际存款`, {
       value: String(yr.total),
@@ -957,7 +1086,7 @@ function bindFinGoals() {
     toast('已校准'); render();
   };
   const gb = $('#mgGoBudget');
-  if (gb) gb.onclick = () => { S.finSub = 'budget'; render(); };
+  if (gb) gb.onclick = () => { S.tab = 'center'; S.centerModule = 'budget'; S.budgetPane = 'category'; render(); };
   const addGoal = $('#finAddGoal');
   if (addGoal) addGoal.onclick = async () => {
     const res = await Modal.form('新建攒钱目标', [
@@ -978,7 +1107,6 @@ function bindFinGoals() {
       Store.removeSavingsGoal(id); render();
     }
   });
-  bindLedgerManage();
 }
 
 /* ============================================================
@@ -1000,15 +1128,15 @@ function opDebtPreviewText(openingDebt) {
   return `按现在的填法，<b>当前欠款 = ${fmtM(shown)}</b>（期初 ${fmtM(Number(openingDebt) || 0)} ＋ 借入 ${fmtM(dt.borrow)} − 还款 ${fmtM(dt.repay)}）。`;
 }
 
-function viewAccounts() {
+function viewAccounts(pane = 'all') {
   const as = Store.assetsAsOf('9999-12-31');
   const snap = Store.accountsSnapshot();
   const dl = debtLabel(as.debt);
   const overpaid = netRepaid(as.debt);
   const dtAll = Store.debtTotals(Store.getEntries());   // 全部记录的借入/还款/借出/收回累计
   const curDebt = Math.max(as.debt, 0);
-  return `
-  <div class="hero">
+  return `<div class="wallet-pane wallet-${pane}">
+  <div class="hero wallet-hero">
     <div class="h-label">净资产 = 账户总余额 ＋ 别人欠我 − 我欠别人</div>
     <div class="h-big">¥ ${fmtM(as.net)}</div>
     <div class="h-row">
@@ -1017,10 +1145,10 @@ function viewAccounts() {
       <div class="h-item"><div class="h-label">别人欠我</div><div class="h-val">${fmtM(Math.max(as.credit, 0))}</div></div>
     </div>
   </div>
-  ${overpaid > 0 ? `<div class="remind-bar" style="margin-bottom:14px"><span class="rb-ico">ℹ️</span><span class="rb-t">你的账里<b>还款比借入多了 ¥${fmtM(overpaid)}</b>（多半是早期用花呗付款时没记「借」，只记了「还」）。这不影响账户余额和收支统计。<br>如果开始记账前确实欠着这笔钱，往下拉在<b>「期初负债」</b>填 ${fmtM(overpaid)} 就对上了；如果没欠，忽略即可。</span></div>` : ''}
+  ${overpaid > 0 ? `<div class="remind-bar wallet-reminder" style="margin-bottom:14px"><span class="rb-ico">ℹ️</span><span class="rb-t">你的账里<b>还款比借入多了 ¥${fmtM(overpaid)}</b>（多半是早期用花呗付款时没记「借」，只记了「还」）。这不影响账户余额和收支统计。<br>如果开始记账前确实欠着这笔钱，往下拉在<b>「期初负债」</b>填 ${fmtM(overpaid)} 就对上了；如果没欠，忽略即可。</span></div>` : ''}
 
-  <div class="card">
-    <h3>💼 我的账户
+  <div class="card wallet-assets-card">
+    <h3>💼 我的资产
       <span style="float:right;font-size:.82rem;font-weight:700">总余额 ${fmtM(snap.total)}</span>
     </h3>
     <div class="sub">记账时选对应账户，余额自动增减，形成闭环。没选账户的记录都算到「现金」名下。</div>
@@ -1050,7 +1178,7 @@ function viewAccounts() {
     </details>` : ''}
   </div>
 
-  <div class="card">
+  <div class="card wallet-debt-card">
     <h3>🏦 负债明细</h3>
     <div class="sub">当前欠款 = 期初负债 ＋ 累计借入 − 累计还款（不会低于 0）</div>
     <div class="debt-ledger">
@@ -1069,7 +1197,7 @@ function viewAccounts() {
     </div>` : ''}
   </div>
 
-  <div class="card">
+  <div class="card wallet-opening-card">
     <h3>🏦 负债与债权（期初）</h3>
     <div class="sub">开始记账<b>之前</b>就欠着的 / 别人欠你的。之后的借入还款按记账自动累计。<br>
       净资产 = 账户总余额 ＋ 别人欠我 − 我欠别人</div>
@@ -1088,7 +1216,7 @@ function viewAccounts() {
       <div class="debt-box ${as.credit > 0 ? 'warn' : ''}"><div class="d-label">债权</div><div class="d-val">${fmtM(Math.max(as.credit, 0))}</div></div>
       <div class="debt-box ${as.net >= 0 ? 'good' : 'bad'}"><div class="d-label">净资产</div><div class="d-val" style="color:${as.net >= 0 ? 'var(--brand)' : 'var(--danger)'}">${fmtM(as.net)}</div></div>
     </div>
-  </div>`;
+  </div></div>`;
 }
 
 function bindAccounts() {
@@ -1232,7 +1360,10 @@ function viewRecord() {
       </label>
     </h3>
     <div class="sub">多笔收支写在一起，用逗号分开，自动拆分、判断收支并归类。日期可在下方修改。</div>
-    <input type="date" id="recDate" value="${S.recordDate}" style="margin-bottom:10px">
+    <div class="date-with-ledger">
+      <input type="date" id="recDate" value="${S.recordDate}">
+      <button class="btn ghost small" id="recDatePick" type="button">🗓 有账日期</button>
+    </div>
     <textarea id="smartText" placeholder="例：咖啡 15，超市购物 68.5，工资收入 8000"></textarea>
     <button class="btn block" id="btnParse">解析</button>
     <button class="btn ghost block" id="btnAiShot" style="margin-top:8px">📷 截图记账（${AI.ready() && Store.getSettings().ai.enabled !== false ? 'AI 识别' : '本地识别，免配置'}）</button>
@@ -1359,6 +1490,10 @@ function bindRecord() {
   const rt = $('#recTransfer');
   if (rt) rt.onclick = doTransfer;
   $('#recDate').onchange = (ev) => { S.recordDate = ev.target.value || todayStr(); render(); };
+  $('#recDatePick').onclick = async () => {
+    const d = await pickPeriod('day', S.recordDate);
+    if (d) { S.recordDate = d; render(); }
+  };
   $('#btnParse').onclick = () => {
     const text = $('#smartText').value.trim();
     if (!text) { toast('请先输入内容'); return; }
@@ -1376,10 +1511,10 @@ function bindRecord() {
     if (ev.target.checked && !AI.ready()) {
       ev.target.checked = false;
       const go = await Modal.confirm('AI 记账识别需要先接入模型', {
-        text: '勾选后，截图记账会用 AI 识别账单（比本地识别准很多）。\n先花一分钟接入一个模型（有免费的）：\n\n1. 去「个人中心 → 常规 → AI 模型接入」\n2. 服务商选「智谱 GLM」（glm-4v-flash 免费看图）\n3. 粘上你申请的 API Key，点「测试连接」\n\n数据只发给你自己选的服务商。不配置也能用本地识别。',
+        text: '勾选后，截图记账会用 AI 识别账单（比本地识别准很多）。\n先花一分钟接入一个模型（有免费的）：\n\n1. 去「账户中心 → 设置 → AI 模型」\n2. 服务商选「智谱 GLM」（glm-4v-flash 免费看图）\n3. 粘上你申请的 API Key，点「测试连接」\n\n数据只发给你自己选的服务商。不配置也能用本地识别。',
         okText: '去配置 →',
       });
-      if (go) { S.tab = 'settings'; S.setSub = 'general'; render(); }
+      if (go) { S.tab = 'center'; S.centerModule = 'settings'; S.settingsPane = 'ai'; render(); }
       return;
     }
     Store.updateSettings({ ai: { ...Store.getSettings().ai, enabled: ev.target.checked } });
@@ -1425,7 +1560,7 @@ function bindRecord() {
         toast(`识别出 ${items.length} 笔（${useAI ? 'AI' : '本地'}），请核对后保存`);
         render();
       } catch (err) {
-        shotStatus('❌ ' + esc(err.message) + (useAI ? '' : '<br>本地识别对复杂截图有限，可在「个人中心→常规」接入 AI 模型提升效果。'));
+        shotStatus('❌ ' + esc(err.message) + (useAI ? '' : '<br>本地识别对复杂截图有限，可在「账户中心→设置→AI 模型」接入模型提升效果。'));
         aiBtn.disabled = false;
       }
     };
@@ -1594,6 +1729,7 @@ function viewDetail() {
   </div>
   <div class="row" style="margin-bottom:12px">
     <input type="date" id="dGoDate" value="${S.detailMonth}-01" title="选一天，直接跳过去">
+    <button class="btn ghost small narrow" id="dGoPick" title="在月历里查看有账的小点">🗓</button>
     <button class="btn small narrow" id="dGo">跳到这天</button>
   </div>
   <div class="summary-strip">
@@ -1661,6 +1797,10 @@ function bindDetail() {
   };
   $('#dGo').onclick = goDay;
   $('#dGoDate').onchange = goDay;
+  $('#dGoPick').onclick = async () => {
+    const d = await pickPeriod('day', $('#dGoDate').value || S.detailMonth + '-01');
+    if (d) { $('#dGoDate').value = d; goDay(); }
+  };
   $$('.pill[data-f]').forEach(b => b.onclick = () => { S.detailFilter = b.dataset.f; render(); });
   $('#dCatFilter').onchange = ev => { if (ev.target.value) { S.detailFilter = ev.target.value; render(); } };
   let t;
@@ -2630,7 +2770,7 @@ function aiProviderOf(ai) {
   return hit ? hit.id : ((ai || {}).url ? 'custom' : 'zhipu');
 }
 
-function viewData() {
+function viewData(pane = 'all') {
   const n = Store.getEntries().length;
   const kb = (Store.storageSize() / 1024).toFixed(1);
   const years = Store.years();
@@ -2642,8 +2782,8 @@ function viewData() {
   const cur = st.theme;
   const as = Store.assetsAsOf('9999-12-31');
 
-  return `
-  <div class="card">
+  return `<div class="settings-pane settings-${pane}">
+  <div class="card settings-account-card">
     <h3>💼 资产与账户</h3>
     <div class="sub">净资产、各账户余额、期初负债/债权都在「账户」标签页管理。</div>
     <div class="debt-strip">
@@ -2654,8 +2794,8 @@ function viewData() {
   </div>
 
   <div class="card-cols">
-  <div class="card">
-    <h3>🎨 主题配色</h3>
+  <div class="card settings-theme-card">
+    <h3>🎨 主要配色</h3>
     <div class="sub">换个心情，所有页面和图表跟着变</div>
     <div class="theme-grid">
       ${themes.map(t => `
@@ -2666,7 +2806,7 @@ function viewData() {
     </div>
   </div>
 
-  <div class="card">
+  <div class="card settings-ai-card">
     <h3>🤖 AI 模型接入（可选）</h3>
     <div class="sub">配好后「📷 截图记账」更聪明：账单截图直接变记账条目。<br>
       <b>不填 = 完全不联网</b>；填了也只发给你自己选的服务商。截图识别要用<b>支持看图的模型</b>。</div>
@@ -2690,7 +2830,7 @@ function viewData() {
   </div>
   </div>
 
-  <div class="card">
+  <div class="card settings-backup-card">
     <h3>⏰ 自动备份</h3>
     <div class="sub">当前环境：<b>${platName}</b>${plat === 'android' ? '（存到手机「文档」文件夹，可用文件管理器或网盘同步）' : ''}</div>
     <div id="bkCapHint"></div>
@@ -2726,7 +2866,7 @@ function viewData() {
   </div>
 
   <div class="card-cols">
-  <div class="card">
+  <div class="card settings-export-card">
     <h3>⬇️ 导出</h3>
     <div class="sub">表格（Excel）含明细、月度汇总、分类汇总、年度对比 4 张工作表；图谱会把「统计 / 对比」页的图表存成图片</div>
     <div class="row" style="flex-wrap:wrap">
@@ -2742,7 +2882,7 @@ function viewData() {
     </div>
   </div>
 
-  <div class="card">
+  <div class="card settings-import-card">
     <h3>⬆️ 导入</h3>
     <div class="sub">选文件就行，会自动认格式：
       <br>① <b>你原来的手写账单</b>（每月一张表、一行一天「1号：早餐 3，地铁 4」、带「支出合计」列）—— 自动逐日拆分归类
@@ -2761,16 +2901,16 @@ function viewData() {
   </div>
 
   <div class="card-cols">
-  <div class="card">
+  <div class="card settings-current-card">
     <h3>📦 当前数据</h3>
     <div class="sub" style="margin-bottom:0">共 ${n} 笔记录，占用约 ${kb} KB${years.length ? '，覆盖年份：' + years.join('、') : ''}</div>
   </div>
 
-  <div class="card">
+  <div class="card settings-clear-card">
     <h3>⚠️ 清空</h3>
     <button class="btn danger" id="btnClear">清空全部数据</button>
   </div>
-  </div>`;
+  </div></div>`;
 }
 
 /* 统一的文件保存：电脑版走「另存为」对话框，其它端走浏览器下载 */
@@ -3207,9 +3347,9 @@ function bindData() {
   /* 主题 */
   $$('[data-theme]').forEach(el => el.onclick = () => { Theme.set(el.dataset.theme); render(); });
 
-  /* 去账户页（已并入财务管理） */
+  /* 兼容旧卡片里的账户入口 */
   const ga = $('#goAccounts');
-  if (ga) ga.onclick = () => { S.tab = 'finance'; S.finSub = 'accounts'; render(); };
+  if (ga) ga.onclick = () => { S.tab = 'center'; S.centerModule = 'wallet'; S.walletPane = 'assets'; render(); };
 
   /* AI 模型接入（四要素：服务商 / 接口地址 / 模型 ID / 密钥） */
   const aiSave = $('#aiSave');
@@ -3536,14 +3676,19 @@ function importHistory(obj) {
   else if (standalone) document.body.classList.add('pwa-standalone');
 })();
 
-$$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.editingId = null; render(); });
+$$('.tab').forEach(b => b.onclick = () => {
+  S.tab = b.dataset.tab;
+  if (S.tab === 'center') S.centerModule = 'home';
+  S.editingId = null;
+  render();
+});
 $('#ledgerChip').onclick = openLedgerPicker;
 Theme.init();
 render();
 /* 自动备份完成后提示一下，并刷新设置页的备份列表 */
 window.onBackupDone = (res, time) => {
   toast(`⏰ ${time} 自动备份完成 → ${res.where}`);
-  if (S.tab === 'settings' && S.setSub === 'general') render();
+  if (S.tab === 'center' && S.centerModule === 'settings' && S.settingsPane === 'backup') render();
 };
 Backup.start();
 
@@ -3560,14 +3705,14 @@ async function licenseGate() {
     <div class="gate-card">
       <h2>🔑 富财记 · 授权</h2>
       <div class="sub">感谢使用！电脑版 / 安卓版需要授权码激活（一次授权，终身使用）。<br>
-        把下面「机器码」发给作者换取授权码，或在「个人中心 → 联系作者」扫码。</div>
+        把下面「机器码」发给开发者换取授权码，或在「账户中心 → 联系开发者」扫码。</div>
       <label class="fld">本机机器码（发给作者）</label>
       <div class="path-box" id="gateMc">${st.mc}</div>
       <button class="btn ghost small" id="gateCopy" style="margin:8px 0">复制机器码</button>
       <label class="fld">粘贴授权码</label>
       <textarea id="gateInput" placeholder="把作者发来的授权码整段粘贴到这里" style="min-height:70px"></textarea>
       <button class="btn block" id="gateOk">激活并进入</button>
-      <button class="btn ghost block" id="gateContact">📮 联系作者获取授权码</button>
+      <button class="btn ghost block" id="gateContact">📮 联系开发者获取授权码</button>
     </div>`;
   document.body.appendChild(mask);
   $('#gateCopy').onclick = () => copyText(st.mc);
