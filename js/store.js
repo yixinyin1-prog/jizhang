@@ -30,7 +30,7 @@ const Store = (() => {
      每笔记录属于一个账本；顶部可切换「全部账本」或某一本。
      没设账本的记录都算「默认账本」，所以不开账本也能一起管理。 */
   const DEFAULT_LEDGERS = [
-    { id: 'default', name: '日常账本', icon: '📒', color: '#0b8f66', builtin: true },
+    { id: 'default', name: '日常账本', icon: '📒', color: '#536784', builtin: true },
   ];
   const DEFAULT_LEDGER = 'default';
   const LEDGER_ICONS = ['📒', '📓', '📔', '📕', '📗', '📘', '💼', '🏠', '✈️', '🚗', '🎮', '🍜', '💰', '👶', '🐱', '🎓', '🏥', '🛒', '❤️', '🌱'];
@@ -82,16 +82,40 @@ const Store = (() => {
 
   /* ---------- 主题 ---------- */
   const THEMES = [
-    { id: 'green',  name: '清新绿', c1: '#0aa87a', c2: '#0b8f66', c3: '#0a7d63' },
-    { id: 'blue',   name: '深海蓝', c1: '#3d8bfd', c2: '#2563d9', c3: '#1e4fb0' },
-    { id: 'purple', name: '暮光紫', c1: '#9b6ede', c2: '#7c4fc4', c3: '#653da8' },
-    { id: 'orange', name: '暖阳橙', c1: '#fb923c', c2: '#ea7317', c3: '#c25c0c' },
-    { id: 'rose',   name: '樱花粉', c1: '#f472a6', c2: '#e0508a', c3: '#bd3a6f' },
-    { id: 'dark',   name: '暗夜黑', c1: '#3f4d57', c2: '#2b363e', c3: '#1d252b', dark: true },
+    {
+      id: 'mineral', name: '雾霭矿物蓝', c1: '#536784', c2: '#425775', c3: '#17233a',
+      bg: '#f1f3f6', card: '#fbfbfa', text: '#242a33', text2: '#5e6878', text3: '#8c96a5',
+      line: '#dfe4ea', input: '#f5f6f8', track: '#e8ebef', metal: '#b39a70',
+    },
+    {
+      id: 'terracotta', name: '赤陶铜棕', c1: '#a95c45', c2: '#8d4b3a', c3: '#2b2623',
+      bg: '#f3eee8', card: '#fcfaf7', text: '#302a27', text2: '#6e625b', text3: '#9b8e85',
+      line: '#e5dcd2', input: '#f7f2ec', track: '#ebe2d8', metal: '#b49a6c',
+    },
+    {
+      id: 'jade', name: '沉静松石', c1: '#47796f', c2: '#35665d', c3: '#203f3a',
+      bg: '#eff3f1', card: '#fbfcfb', text: '#25302d', text2: '#5d6b67', text3: '#8b9995',
+      line: '#dce5e1', input: '#f3f7f5', track: '#e5ece9', metal: '#a6926d',
+    },
+    {
+      id: 'purple', name: '岩灰暮紫', c1: '#776b87', c2: '#625672', c3: '#352f3e',
+      bg: '#f2f0f4', card: '#fcfbfc', text: '#2d2932', text2: '#6b6472', text3: '#9992a0',
+      line: '#e4e0e8', input: '#f6f4f7', track: '#ebe7ee', metal: '#ae9671',
+    },
+    {
+      id: 'rose', name: '烟霞豆沙', c1: '#ad7180', c2: '#925d6b', c3: '#563842',
+      bg: '#f5f0f1', card: '#fdfbfb', text: '#332a2d', text2: '#716267', text3: '#9f9095',
+      line: '#eadfe2', input: '#f8f3f4', track: '#eee4e6', metal: '#b19a78',
+    },
+    {
+      id: 'dark', name: '夜幕石墨', c1: '#56616c', c2: '#39434c', c3: '#171c21', dark: true,
+      bg: '#151a1f', card: '#1e242a', text: '#e9ecef', text2: '#adb5bd', text3: '#7f8992',
+      line: '#303840', input: '#252c33', track: '#2b333a', metal: '#bca477',
+    },
   ];
 
   const DEFAULT_SETTINGS = {
-    theme: 'green',
+    theme: 'mineral',
     // 开始记账之前就已经欠着的钱（花呗/分付/信用卡已用额度等）。
     // 没有它，早期只记了「还款」没记「借入」的账会算出负数余额。
     openingDebt: 0,

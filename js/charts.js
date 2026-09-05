@@ -4,6 +4,7 @@
 const Charts = (() => {
   const NS = 'http://www.w3.org/2000/svg';
   const fmt = (n) => n >= 10000 ? (n / 10000).toFixed(1) + '万' : (Math.round(n * 100) / 100).toLocaleString('zh-CN');
+  const cssColor = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 
   function el(tag, attrs, text) {
     const e = document.createElementNS(NS, tag);
@@ -24,8 +25,8 @@ const Charts = (() => {
     // y 轴网格
     for (let i = 0; i <= 4; i++) {
       const y = P.t + ch - ch * i / 4;
-      svg.appendChild(el('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: '#e7ecea', 'stroke-width': 1 }));
-      svg.appendChild(el('text', { x: P.l - 5, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: '#8a968f' }, fmt(max * i / 4)));
+      svg.appendChild(el('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: cssColor('--line', '#dfe4ea'), 'stroke-width': 1 }));
+      svg.appendChild(el('text', { x: P.l - 5, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: cssColor('--text-3', '#8c96a5') }, fmt(max * i / 4)));
     }
     const groupW = cw / labels.length;
     const barW = Math.min(22, groupW * 0.7 / series.length);
@@ -39,7 +40,7 @@ const Charts = (() => {
         const t = el('title', {}, `${lb} ${s.name}: ${fmt(v)}`);
         rect.appendChild(t); svg.appendChild(rect);
       });
-      svg.appendChild(el('text', { x: gx, y: H - 10, 'text-anchor': 'middle', 'font-size': 10, fill: '#8a968f' }, lb));
+      svg.appendChild(el('text', { x: gx, y: H - 10, 'text-anchor': 'middle', 'font-size': 10, fill: cssColor('--text-3', '#8c96a5') }, lb));
     });
     return svg;
   }
@@ -53,13 +54,13 @@ const Charts = (() => {
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', style: 'min-width:480px' });
     for (let i = 0; i <= 4; i++) {
       const y = P.t + ch - ch * i / 4;
-      svg.appendChild(el('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: '#e7ecea' }));
-      svg.appendChild(el('text', { x: P.l - 5, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: '#8a968f' }, fmt(max * i / 4)));
+      svg.appendChild(el('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: cssColor('--line', '#dfe4ea') }));
+      svg.appendChild(el('text', { x: P.l - 5, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: cssColor('--text-3', '#8c96a5') }, fmt(max * i / 4)));
     }
     const step = cw / Math.max(labels.length - 1, 1);
     labels.forEach((lb, i) => {
       if (labels.length <= 14 || i % 2 === 0)
-        svg.appendChild(el('text', { x: P.l + step * i, y: H - 10, 'text-anchor': 'middle', 'font-size': 10, fill: '#8a968f' }, lb));
+        svg.appendChild(el('text', { x: P.l + step * i, y: H - 10, 'text-anchor': 'middle', 'font-size': 10, fill: cssColor('--text-3', '#8c96a5') }, lb));
     });
     for (const s of series) {
       let d = '';
@@ -98,8 +99,8 @@ const Charts = (() => {
       svg.appendChild(path);
       a = a2;
     }
-    svg.appendChild(el('text', { x: R, y: R - 4, 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 700, fill: '#23312c' }, fmt(total)));
-    svg.appendChild(el('text', { x: R, y: R + 14, 'text-anchor': 'middle', 'font-size': 10, fill: '#8a968f' }, opts.centerLabel || '合计'));
+    svg.appendChild(el('text', { x: R, y: R - 4, 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 700, fill: cssColor('--text', '#242a33') }, fmt(total)));
+    svg.appendChild(el('text', { x: R, y: R + 14, 'text-anchor': 'middle', 'font-size': 10, fill: cssColor('--text-3', '#8c96a5') }, opts.centerLabel || '合计'));
     return svg;
   }
 
@@ -121,7 +122,7 @@ const Charts = (() => {
         path = el('circle', { cx: R, cy: R, r: r1, fill: it.color });
       } else {
         const d = `M ${R} ${R} L ${p(a, r1)} A ${r1} ${r1} 0 ${frac > 0.5 ? 1 : 0} 1 ${p(a2, r1)} Z`;
-        path = el('path', { d, fill: it.color, stroke: '#fff', 'stroke-width': 1 });
+        path = el('path', { d, fill: it.color, stroke: cssColor('--card', '#fbfbfa'), 'stroke-width': 1 });
       }
       path.appendChild(el('title', {}, `${it.label}: ${fmt(it.value)} (${(frac * 100).toFixed(1)}%)`));
       svg.appendChild(path);
@@ -148,9 +149,9 @@ const Charts = (() => {
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', style: 'min-width:420px' });
     items.forEach((it, i) => {
       const y = 8 + i * rowH;
-      svg.appendChild(el('text', { x: labelW - 8, y: y + rowH / 2 + 3, 'text-anchor': 'end', 'font-size': 11.5, fill: '#5b6b64' },
+      svg.appendChild(el('text', { x: labelW - 8, y: y + rowH / 2 + 3, 'text-anchor': 'end', 'font-size': 11.5, fill: cssColor('--text-2', '#5e6878') },
         (it.label.length > 6 ? it.label.slice(0, 6) + '…' : it.label)));
-      svg.appendChild(el('rect', { x: labelW, y: y + 3, width: cw, height: rowH - 12, rx: 4, fill: '#f0f3f1' }));
+      svg.appendChild(el('rect', { x: labelW, y: y + 3, width: cw, height: rowH - 12, rx: 4, fill: cssColor('--track', '#e8ebef') }));
       const w = cw * Math.abs(it.value) / max;
       // 负值（多为冲抵/退款）用斜纹描边区分，避免和正值看起来一样
       const bar = el('rect', {
@@ -162,7 +163,7 @@ const Charts = (() => {
       });
       bar.appendChild(el('title', {}, `${it.label}: ${fmt(it.value)}${it.value < 0 ? '（冲抵）' : ''}`));
       svg.appendChild(bar);
-      svg.appendChild(el('text', { x: W - 4, y: y + rowH / 2 + 3, 'text-anchor': 'end', 'font-size': 11, 'font-weight': 600, fill: '#1c2a24' }, fmt(it.value)));
+      svg.appendChild(el('text', { x: W - 4, y: y + rowH / 2 + 3, 'text-anchor': 'end', 'font-size': 11, 'font-weight': 600, fill: cssColor('--text', '#242a33') }, fmt(it.value)));
     });
     return svg;
   }
@@ -180,21 +181,21 @@ const Charts = (() => {
     // 网格
     for (let i = -2; i <= 2; i++) {
       const y = zero - half * i / 2;
-      svg.appendChild(el('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: i === 0 ? '#c8d2ce' : '#eef2f0', 'stroke-width': i === 0 ? 1.2 : 1 }));
-      svg.appendChild(el('text', { x: P.l - 5, y: y + 4, 'text-anchor': 'end', 'font-size': 9.5, fill: '#93a19a' }, fmt(Math.abs(max * i / 2))));
+      svg.appendChild(el('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: i === 0 ? cssColor('--text-3', '#8c96a5') : cssColor('--line', '#dfe4ea'), 'stroke-width': i === 0 ? 1.2 : 1 }));
+      svg.appendChild(el('text', { x: P.l - 5, y: y + 4, 'text-anchor': 'end', 'font-size': 9.5, fill: cssColor('--text-3', '#8c96a5') }, fmt(Math.abs(max * i / 2))));
     }
     const gw = cw / labels.length, bw = Math.min(15, gw * 0.34);
     labels.forEach((lb, i) => {
       const gx = P.l + gw * i + gw / 2;
       const hi = half * (income[i] || 0) / max;
       const he = half * (expense[i] || 0) / max;
-      const rIn = el('rect', { x: gx - bw - 1, y: zero - hi, width: bw, height: Math.max(hi, 0), rx: 2, fill: '#2f7cf6' });
+      const rIn = el('rect', { x: gx - bw - 1, y: zero - hi, width: bw, height: Math.max(hi, 0), rx: 2, fill: cssColor('--income', '#477bb8') });
       rIn.appendChild(el('title', {}, `${lb} 收入: ${fmt(income[i] || 0)}`));
-      const rEx = el('rect', { x: gx + 1, y: zero, width: bw, height: Math.max(he, 0), rx: 2, fill: '#f0524c' });
+      const rEx = el('rect', { x: gx + 1, y: zero, width: bw, height: Math.max(he, 0), rx: 2, fill: cssColor('--danger', '#d75c5c') });
       rEx.appendChild(el('title', {}, `${lb} 支出: ${fmt(expense[i] || 0)}`));
       svg.appendChild(rIn); svg.appendChild(rEx);
       if (labels.length <= 16 || i % 3 === 0)
-        svg.appendChild(el('text', { x: gx, y: H - 10, 'text-anchor': 'middle', 'font-size': 9.5, fill: '#93a19a' }, lb));
+        svg.appendChild(el('text', { x: gx, y: H - 10, 'text-anchor': 'middle', 'font-size': 9.5, fill: cssColor('--text-3', '#8c96a5') }, lb));
     });
     // 结余折线
     let d = '';
@@ -204,10 +205,10 @@ const Charts = (() => {
       const y = zero - half * bal / max;
       d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
     });
-    svg.appendChild(el('path', { d, fill: 'none', stroke: '#f5a524', 'stroke-width': 2, 'stroke-dasharray': '4 3' }));
+    svg.appendChild(el('path', { d, fill: 'none', stroke: cssColor('--metal', '#b39a70'), 'stroke-width': 2, 'stroke-dasharray': '4 3' }));
     labels.forEach((lb, i) => {
       const bal = (income[i] || 0) - (expense[i] || 0);
-      const c = el('circle', { cx: P.l + gw * i + gw / 2, cy: zero - half * bal / max, r: 2.6, fill: '#f5a524' });
+      const c = el('circle', { cx: P.l + gw * i + gw / 2, cy: zero - half * bal / max, r: 2.6, fill: cssColor('--metal', '#b39a70') });
       c.appendChild(el('title', {}, `${lb} 结余: ${fmt(bal)}`));
       svg.appendChild(c);
     });
@@ -338,7 +339,7 @@ const Charts = (() => {
       const cx = P.l + gw * i + gw / 2;
       const r = el('rect', {
         x: cx - bw / 2, y: v >= 0 ? zero - h : zero, width: bw, height: Math.max(h, 0), rx: 2,
-        fill: v >= 0 ? (opts.posColor || '#0b8f66') : (opts.negColor || '#f0524c'),
+        fill: v >= 0 ? (opts.posColor || cssColor('--brand', '#425775')) : (opts.negColor || cssColor('--danger', '#d75c5c')),
       });
       r.appendChild(el('title', {}, `${lb}: ${fmt(v)}`));
       svg.appendChild(r);

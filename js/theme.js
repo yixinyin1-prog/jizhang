@@ -19,34 +19,34 @@ const Theme = (() => {
     r.setProperty('--brand', t.c2);
     r.setProperty('--brand-2', t.c1);
     r.setProperty('--brand-deep', t.c3);
-    r.setProperty('--grad', `linear-gradient(135deg, ${t.c1} 0%, ${t.c2} 55%, ${t.c3} 100%)`);
-    r.setProperty('--btn-shadow', `${shade(t.c2, .9)}47`);
-    // 浅色底纹：按钮次要态、选中态背景
-    r.setProperty('--brand-soft', shade(t.c1, 1.86));
-    r.setProperty('--brand-soft-2', shade(t.c1, 1.72));
+    r.setProperty('--grad', `linear-gradient(135deg, ${t.c2} 0%, ${t.c3} 100%)`);
+    r.setProperty('--header-grad', `linear-gradient(112deg, ${t.c3} 0%, ${shade(t.c3, 1.12)} 58%, ${shade(t.c2, .78)} 100%)`);
+    r.setProperty('--btn-shadow', `${shade(t.c2, .82)}32`);
+    r.setProperty('--brand-soft', `color-mix(in srgb, ${t.c1} 10%, ${t.card || '#fff'})`);
+    r.setProperty('--brand-soft-2', `color-mix(in srgb, ${t.c1} 18%, ${t.card || '#fff'})`);
+    r.setProperty('--metal', t.metal || '#b39a70');
+    r.setProperty('--bg', t.bg || '#f1f3f6');
+    r.setProperty('--card', t.card || '#fbfbfa');
+    r.setProperty('--text', t.text || '#242a33');
+    r.setProperty('--text-2', t.text2 || '#5e6878');
+    r.setProperty('--text-3', t.text3 || '#8c96a5');
+    r.setProperty('--line', t.line || '#dfe4ea');
+    r.setProperty('--input-bg', t.input || '#f5f6f8');
+    r.setProperty('--track', t.track || '#e8ebef');
 
     document.body.classList.toggle('theme-dark', !!t.dark);
-    if (t.dark) {
-      r.setProperty('--bg', '#161b1f');
-      r.setProperty('--card', '#1f262c');
-      r.setProperty('--text', '#e8edea');
-      r.setProperty('--text-2', '#a5b1ac');
-      r.setProperty('--text-3', '#78857f');
-      r.setProperty('--line', '#2e373e');
-      r.setProperty('--brand-soft', '#2a343b');
-      r.setProperty('--brand-soft-2', '#323d45');
-      r.setProperty('--input-bg', '#252d34');
-      r.setProperty('--track', '#2b343b');
-    } else {
-      r.removeProperty('--bg'); r.removeProperty('--card');
-      r.removeProperty('--text'); r.removeProperty('--text-2'); r.removeProperty('--text-3');
-      r.removeProperty('--line'); r.removeProperty('--input-bg'); r.removeProperty('--track');
-    }
     const meta = document.querySelector('meta[name=theme-color]');
-    if (meta) meta.setAttribute('content', t.c2);
+    if (meta) meta.setAttribute('content', t.c3);
   }
 
-  function init() { apply(Store.getSettings().theme); }
+  function init() {
+    const saved = Store.getSettings().theme;
+    const themes = Store.getThemes();
+    /* 视觉 3.0：旧默认绿色只迁移主题选择，不触碰任何账目或业务设置。 */
+    const id = themes.some(t => t.id === saved) ? saved : themes[0].id;
+    if (id !== saved) Store.updateSettings({ theme: id });
+    apply(id);
+  }
   function set(id) { Store.updateSettings({ theme: id }); apply(id); }
 
   return { apply, init, set, shade };

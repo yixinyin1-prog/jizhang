@@ -6,6 +6,7 @@ const $$ = (sel, root) => [...(root || document).querySelectorAll(sel)];
 
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtM(n) { return (Math.round(n * 100) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function themeBrand() { return getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() || '#425775'; }
 function pad2(n) { return String(n).padStart(2, '0'); }
 function todayStr() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
 function toast(msg) {
@@ -1935,7 +1936,7 @@ function viewStats() {
     <div class="sub">积蓄 = 期初积蓄 ＋ 累计收入 − 累计支出，可在「账户」页设期初</div>
     <div class="chart-wrap" id="savingsChart"></div>
     <div class="legend">
-      <span class="lg"><span class="dot" style="background:#0b8f66"></span>月末积蓄</span>
+      <span class="lg"><span class="dot" style="background:var(--brand)"></span>月末积蓄</span>
       <span class="lg"><span class="dot" style="background:#f0524c"></span>月末负债</span>
     </div>
     <div style="font-size:.76rem;color:var(--text-3);margin:12px 0 4px">每月结余（正=攒下，负=倒贴）</div>
@@ -1959,7 +1960,7 @@ function viewStats() {
     <div class="chart-wrap" id="debtChart"></div>
     <div class="legend">
       <span class="lg"><span class="dot" style="background:#c88a4a"></span>借入</span>
-      <span class="lg"><span class="dot" style="background:#0b8f66"></span>还款</span>
+      <span class="lg"><span class="dot" style="background:var(--brand)"></span>还款</span>
       <span class="lg"><span class="dot" style="background:#f0524c"></span>负债余额</span>
     </div>
   </div>` : ''}`;
@@ -2068,7 +2069,7 @@ function bindStats() {
     const ser = Store.monthlySavingsSeries(year);
     const labels = Array.from({ length: 12 }, (_, i) => (i + 1) + '月');
     sc.appendChild(Charts.lineChart(labels, [
-      { name: '月末积蓄', color: '#0b8f66', values: ser.map(s => s.savings) },
+      { name: '月末积蓄', color: themeBrand(), values: ser.map(s => s.savings) },
       { name: '月末负债', color: '#f0524c', values: ser.map(s => Math.max(s.debt, 0)) },
     ], { height: 220 }));
     const ms = Store.monthlySeries(year);
@@ -2087,7 +2088,7 @@ function bindStats() {
     const labels = bks.map(b => b.label);
     dc.appendChild(Charts.barChart(labels, [
       { name: '借入', color: '#c88a4a', values: borrow },
-      { name: '还款', color: '#0b8f66', values: repay },
+      { name: '还款', color: themeBrand(), values: repay },
     ], { height: 200 }));
     const l2 = document.createElement('div');
     l2.style.cssText = 'font-size:.76rem;color:var(--text-3);margin:10px 0 4px';
@@ -2150,7 +2151,7 @@ function cmpYearView() {
     <div class="legend">
       <span class="lg"><span class="dot" style="background:#f0524c"></span>总支出</span>
       <span class="lg"><span class="dot" style="background:#2f7cf6"></span>总收入</span>
-      <span class="lg"><span class="dot" style="background:#0b8f66"></span>结余</span>
+      <span class="lg"><span class="dot" style="background:var(--brand)"></span>结余</span>
     </div>
   </div>
   <div class="card">
@@ -2280,7 +2281,7 @@ function bindCmpYear(years) {
     [
       { name: '总支出', color: '#f0524c', values: rows.map(r => r.expense) },
       { name: '总收入', color: '#2f7cf6', values: rows.map(r => r.income) },
-      { name: '结余', color: '#0b8f66', values: rows.map(r => Math.max(r.balance, 0)) },
+      { name: '结余', color: themeBrand(), values: rows.map(r => Math.max(r.balance, 0)) },
     ], { height: 260, width: Math.max(420, rows.length * 130 + 90) }));
 
   // 明细表
@@ -3619,7 +3620,7 @@ function buildYearCharts(year) {
     out.push({
       name: '负债走势', svg: Charts.barChart(labels, [
         { name: '借入', color: '#c88a4a', values: ds.map(d => d.borrow) },
-        { name: '还款', color: '#0b8f66', values: ds.map(d => d.repay) },
+        { name: '还款', color: themeBrand(), values: ds.map(d => d.repay) },
       ]),
     });
     out.push({ name: '负债余额', svg: Charts.lineChart(labels, [{ name: '负债余额', color: '#f0524c', values: ds.map(d => d.debtBalance) }]) });
