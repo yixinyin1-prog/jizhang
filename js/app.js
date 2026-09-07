@@ -4,6 +4,17 @@
 const $ = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => [...(root || document).querySelectorAll(sel)];
 
+const UI_ICONS = {
+  wallet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h14.5A1.5 1.5 0 0 1 20 9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"/><path d="M20 11h-5a2 2 0 0 0 0 4h5M15 13h.01"/></svg>',
+  budget: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="m14.8 9.2 4.7-4.7M16.5 4.5h3v3"/></svg>',
+  savings: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9.5C6.5 7.2 9 6 12.5 6c4.7 0 7.5 2.5 7.5 6.5 0 2.4-1.2 4.2-3 5.3V21h-3v-2h-5v2H6v-3.1a7 7 0 0 1-2-2.4H2v-4h2c.2-.7.5-1.4 1-2Z"/><path d="M8 7 6.5 4.5C9 4 11 5 12 6m4.5 4h.01"/></svg>',
+  category: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7l9 9-7 7-9-9V4Z"/><circle cx="8" cy="8" r="1.2"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>',
+  profile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6"/></svg>',
+  ledger: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5v-17Z"/><path d="M5 19h15M9 6h7M9 10h7"/></svg>',
+};
+function uiIcon(name) { return UI_ICONS[name] || ''; }
+
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtM(n) { return (Math.round(n * 100) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function themeBrand() { return getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() || '#425775'; }
@@ -46,7 +57,7 @@ const S = {
   finSub: 'budget',           // 财务管理的子页：budget | goals | accounts
   centerModule: 'home',       // 账户中心导航页 / 当前独立模块
   budgetPane: 'overview',     // 预算管理：overview | category | stats
-  savingsPane: 'goals',       // 存钱计划：goals | surplus | plan
+  savingsPane: 'plan',        // 存钱计划：plan | surplus | goals
   walletPane: 'assets',       // 钱包：assets | debt
   settingsPane: 'theme',      // 设置：theme | ai | backup | transfer
   finPeriod: 'month',         // 财务管理看月还是看年
@@ -224,20 +235,20 @@ function centerSubbar(items, current, attr) {
 
 function viewAccountCenter() {
   const modules = [
-    ['wallet', '👛', '钱包', '资产账户、负债与债权'],
-    ['budget', '🎯', '预算管理', '总预算、分类额度与历史参考'],
-    ['savings', '🐷', '存钱计划', '攒钱目标与月度、年度计划'],
-    ['category', '🏷️', '分类', '管理收支分类与关键词'],
-    ['settings', '⚙️', '设置', '配色、AI、备份与数据迁移'],
-    ['profile', '👤', '个人资料', '仅保存在当前设备'],
-    ['ledger', '📚', '账本管理', '新建、编辑与整理账本'],
+    ['wallet', 'wallet', '钱包', '资产账户、负债与债权'],
+    ['budget', 'budget', '预算管理', '总预算、分类额度与历史参考'],
+    ['savings', 'savings', '存钱计划', '月度年度计划与攒钱目标'],
+    ['category', 'category', '分类', '管理收支分类与关键词'],
+    ['settings', 'settings', '设置', '配色、AI、备份与数据迁移'],
+    ['profile', 'profile', '个人资料', '仅保存在当前设备'],
+    ['ledger', 'ledger', '账本管理', '新建、编辑与整理账本'],
   ];
   if (S.centerModule === 'home') {
     return `
       <div class="center-heading"><h2>账户中心</h2><span>选择一个模块进入独立页面</span></div>
       <div class="center-modules">
         ${modules.map(([key, icon, name, hint]) => `<button class="center-module" data-center-module="${key}">
-          <span class="cm-icon">${icon}</span><span class="cm-text"><b>${name}</b><i>${hint}</i></span><span class="cm-arrow">›</span>
+          <span class="cm-icon">${uiIcon(icon)}</span><span class="cm-text"><b>${name}</b><i>${hint}</i></span><span class="cm-arrow">›</span>
         </button>`).join('')}
       </div>
       <div class="center-home-info">${viewMe('license')}${viewMe('contact')}</div>`;
@@ -249,7 +260,7 @@ function viewAccountCenter() {
     sub = centerSubbar([['overview', '预算速览'], ['category', '分类额度'], ['stats', '中位数 / 平均数']], S.budgetPane, 'data-budget-pane');
     content = viewFinBudget(S.budgetPane);
   } else if (S.centerModule === 'savings') {
-    sub = centerSubbar([['goals', '攒钱目标'], ['surplus', '本月守额度'], ['plan', '月度 & 年度']], S.savingsPane, 'data-savings-pane');
+    sub = centerSubbar([['plan', '月度 & 年度'], ['surplus', '本月守额度'], ['goals', '攒钱目标']], S.savingsPane, 'data-savings-pane');
     content = viewFinGoals(S.savingsPane);
   } else if (S.centerModule === 'wallet') {
     sub = centerSubbar([['assets', '我的资产'], ['debt', '负债与债权']], S.walletPane, 'data-wallet-pane');
@@ -266,7 +277,7 @@ function viewAccountCenter() {
   return `
     <div class="center-inner-head">
       <button class="center-back" id="centerBack" type="button">‹ 返回账户中心</button>
-      <div class="center-inner-title"><h2>${active[1]} ${active[2]}</h2><span>${active[3]}</span></div>
+      <span class="center-title-icon">${uiIcon(active[1])}</span><div class="center-inner-title"><h2>${active[2]}</h2><span>${active[3]}</span></div>
     </div>
     <div class="center-content">${sub}${content}</div>`;
 }

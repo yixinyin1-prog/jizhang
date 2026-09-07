@@ -1083,3 +1083,146 @@ body.theme-dark .subtab:hover { color: #eef1f4; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ========================================================================== */
+/* 富财记 · 视觉 4.0：品牌化界面与统一线性图标                              */
+/* ========================================================================== */
+.logo-mark {
+  width: 38px; height: 38px; padding: 0; overflow: hidden; border: 0;
+  background: #0c332a; border-radius: 11px;
+  box-shadow: 0 7px 18px rgba(2,14,11,.34), 0 0 0 1px rgba(218,194,143,.38);
+}
+.logo-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.logo { font-size: 1.26rem; font-weight: 760; letter-spacing: .075em; }
+
+.tab-icon { width: 19px; height: 19px; display: inline-grid; place-items: center; }
+.tab-icon svg, .cm-icon svg, .center-title-icon svg {
+  display: block; width: 100%; height: 100%; fill: none; stroke: currentColor;
+  stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round;
+}
+.tabbar { border-top: 1px solid rgba(255,255,255,.055); }
+.tab { position: relative; border-radius: 9px; }
+.tab.active {
+  color: #fff; background: rgba(255,255,255,.075); border-color: rgba(255,255,255,.08);
+  box-shadow: inset 0 1px rgba(255,255,255,.06);
+}
+.tab.active::after {
+  content: ''; position: absolute; left: 32%; right: 32%; bottom: -7px; height: 2px;
+  border-radius: 2px 2px 0 0; background: color-mix(in srgb, var(--metal) 88%, #fff);
+  box-shadow: 0 -2px 8px color-mix(in srgb, var(--metal) 34%, transparent);
+}
+
+.view { max-width: 1120px; }
+.card {
+  border-color: color-mix(in srgb, var(--line) 88%, var(--card));
+  box-shadow: 0 14px 36px rgba(20,30,46,.055), 0 2px 5px rgba(20,30,46,.035);
+}
+.card h3 {
+  padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--metal) 72%, var(--brand-2));
+  line-height: 1.35;
+}
+.hero { border-radius: 18px; }
+.summary-box { position: relative; overflow: hidden; }
+.summary-box::after {
+  content: ''; position: absolute; left: 18%; right: 18%; bottom: 0; height: 2px;
+  background: color-mix(in srgb, var(--brand-2) 36%, transparent); border-radius: 2px 2px 0 0;
+}
+.btn { letter-spacing: .025em; }
+.btn:not(.ghost):not(.danger) { background: linear-gradient(145deg, color-mix(in srgb, var(--brand-2) 88%, #fff), var(--brand-deep)); }
+
+/* 账户中心做成真正的功能门户：首排是核心财务模块，次排是管理模块。 */
+.center-heading { margin-top: 8px; margin-bottom: 18px; }
+.center-heading h2 { font-size: 1.34rem; font-weight: 760; }
+.center-heading span { font-size: .74rem; letter-spacing: .02em; }
+.center-modules { gap: 14px; }
+.center-module {
+  isolation: isolate; min-height: 82px; padding: 15px 17px;
+  border-color: color-mix(in srgb, var(--line) 90%, var(--card));
+  box-shadow: 0 10px 26px rgba(20,30,46,.045), 0 1px 3px rgba(20,30,46,.035);
+}
+.center-module::before {
+  content: ''; position: absolute; z-index: -1; inset: 0; border-radius: inherit; opacity: .72;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand-soft) 65%, transparent), transparent 58%);
+}
+.center-module:nth-child(-n+3) { min-height: 104px; padding: 18px; }
+.center-module:nth-child(-n+3) .cm-icon { width: 48px; height: 48px; flex-basis: 48px; }
+.center-module:nth-child(-n+3) .cm-text b { font-size: .96rem; }
+.center-module[data-center-module="wallet"] .cm-icon { color: #8a6c3d; background: #f5efe3; border-color: #eadcc2; }
+.center-module[data-center-module="budget"] .cm-icon { color: #5d6382; background: #eef0f7; border-color: #dde1ee; }
+.center-module[data-center-module="savings"] .cm-icon { color: #276955; background: #e9f3ef; border-color: #d6e8e1; }
+.center-module[data-center-module="category"] .cm-icon { color: #8a5e4d; background: #f6efeb; border-color: #eaddd5; }
+.center-module[data-center-module="settings"] .cm-icon { color: #5b6878; background: #edf0f3; border-color: #dfe4e8; }
+.center-module[data-center-module="profile"] .cm-icon { color: #655d79; background: #f0edf4; border-color: #e2ddea; }
+.center-module[data-center-module="ledger"] {
+  min-height: 70px; border-left: 3px solid color-mix(in srgb, var(--metal) 74%, var(--brand));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--metal) 6%, var(--card)), var(--card) 45%);
+}
+.cm-icon {
+  font-size: 0; padding: 10px; color: var(--brand-deep); filter: none;
+  transition: transform .18s ease, color .18s ease, background .18s ease;
+}
+.center-module:hover .cm-icon { transform: translateY(-1px) scale(1.035); }
+.cm-text b { font-weight: 710; letter-spacing: .025em; }
+.cm-text i { font-size: .69rem; line-height: 1.45; }
+.cm-arrow { font-family: Georgia, serif; }
+
+.center-home-info > .card:first-child {
+  background:
+    linear-gradient(115deg, color-mix(in srgb, var(--brand-soft) 70%, var(--card)), var(--card) 55%),
+    var(--card);
+}
+.center-home-info > .card:last-child {
+  background:
+    radial-gradient(circle at 88% 16%, color-mix(in srgb, var(--metal) 8%, transparent), transparent 28%),
+    var(--card);
+}
+
+.center-inner-head {
+  position: relative; overflow: hidden; min-height: 78px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--brand-soft) 62%, var(--card)), var(--card) 60%);
+}
+.center-inner-head::after {
+  content: ''; position: absolute; right: -34px; top: -58px; width: 150px; height: 150px;
+  border: 1px solid color-mix(in srgb, var(--metal) 16%, transparent); border-radius: 50%; pointer-events: none;
+}
+.center-title-icon {
+  flex: 0 0 42px; width: 42px; height: 42px; padding: 10px; border-radius: 12px;
+  color: var(--brand-deep); background: var(--brand-soft);
+  border: 1px solid color-mix(in srgb, var(--brand-2) 17%, var(--line));
+}
+.center-inner-title h2 { font-size: 1.12rem; font-weight: 740; letter-spacing: .025em; }
+.center-back { position: relative; z-index: 1; }
+
+/* 二级功能切换弱化容器、强化当前位置，避免一排厚重按钮。 */
+.center-subbar {
+  gap: 3px; padding: 4px; background: color-mix(in srgb, var(--card) 76%, var(--track));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 72%, transparent);
+}
+.center-subbar .subtab { min-height: 38px; }
+.center-subbar .subtab.on {
+  color: var(--brand-deep); background: var(--card); border-color: color-mix(in srgb, var(--brand-2) 26%, var(--line));
+  box-shadow: 0 4px 12px rgba(20,30,46,.075);
+}
+
+.contact-qr { border-radius: 16px; padding: 7px; }
+.contact-tip { letter-spacing: .02em; }
+
+@media (min-width: 720px) {
+  .topbar-inner, .tabbar { max-width: 1120px; }
+  .layout-wide { grid-template-columns: .94fr 1.06fr; gap: 20px; }
+  .card-cols { gap: 18px; }
+}
+
+@media (max-width: 620px) {
+  .logo-mark { width: 31px; height: 31px; border-radius: 9px; box-shadow: 0 5px 13px rgba(2,14,11,.3), 0 0 0 1px rgba(218,194,143,.32); }
+  .logo { font-size: 1.08rem; letter-spacing: .045em; }
+  .tab-icon { width: 17px; height: 17px; }
+  .tab.active::after { left: 30%; right: 30%; bottom: -5px; }
+  .card h3 { padding-left: 8px; }
+  .center-module:nth-child(-n+3), .center-module { min-height: 68px; padding: 11px 12px; }
+  .center-module:nth-child(-n+3) .cm-icon, .cm-icon { width: 40px; height: 40px; flex-basis: 40px; padding: 9px; }
+  .center-module:nth-child(-n+3) .cm-text b { font-size: .9rem; }
+  .center-module[data-center-module="ledger"] { min-height: 64px; }
+  .center-inner-head { min-height: 66px; }
+  .center-title-icon { flex-basis: 38px; width: 38px; height: 38px; padding: 9px; }
+}

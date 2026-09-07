@@ -11,19 +11,19 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" href="icons/icon-192.png">
 <title>富财记</title>
-<link rel="stylesheet" href="css/style.css?v=1.10.0">
+<link rel="stylesheet" href="css/style.css?v=1.11.0">
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <span class="logo"><span class="logo-mark">¥</span>富财记</span>
+    <span class="logo"><span class="logo-mark"><img src="icons/icon-192.png" alt=""></span><span>富财记</span></span>
     <button id="ledgerChip" class="ledger-chip" title="切换 / 管理账本">📒 <span id="ledgerName">全部账本</span> <span class="lc-caret">▾</span></button>
     <span id="storageHint" class="storage-hint"></span>
   </div>
   <nav class="tabbar">
-    <button class="tab active" data-tab="record"><span class="tab-icon">✏️</span><span>记账</span></button>
-    <button class="tab" data-tab="analysis"><span class="tab-icon">📊</span><span>数据分析</span></button>
-    <button class="tab" data-tab="center"><span class="tab-icon">👤</span><span>账户中心</span></button>
+    <button class="tab active" data-tab="record"><span class="tab-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4M4 20l4-1-3-3-1 4Z"/></svg></span><span>记账</span></button>
+    <button class="tab" data-tab="analysis"><span class="tab-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>数据分析</span></button>
+    <button class="tab" data-tab="center"><span class="tab-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6"/></svg></span><span>账户中心</span></button>
   </nav>
 </header>
 
@@ -32,17 +32,17 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="js/store.js?v=1.10.0"></script>
-<script src="js/theme.js?v=1.10.0"></script>
-<script src="js/license.js?v=1.10.0"></script>
-<script src="js/modal.js?v=1.10.0"></script>
-<script src="js/parser.js?v=1.10.0"></script>
-<script src="js/ai.js?v=1.10.0"></script>
-<script src="js/ocr.js?v=1.10.0"></script>
-<script src="js/charts.js?v=1.10.0"></script>
-<script src="js/xlsx.js?v=1.10.0"></script>
-<script src="js/backup.js?v=1.10.0"></script>
-<script src="js/app.js?v=1.10.0"></script>
+<script src="js/store.js?v=1.11.0"></script>
+<script src="js/theme.js?v=1.11.0"></script>
+<script src="js/license.js?v=1.11.0"></script>
+<script src="js/modal.js?v=1.11.0"></script>
+<script src="js/parser.js?v=1.11.0"></script>
+<script src="js/ai.js?v=1.11.0"></script>
+<script src="js/ocr.js?v=1.11.0"></script>
+<script src="js/charts.js?v=1.11.0"></script>
+<script src="js/xlsx.js?v=1.11.0"></script>
+<script src="js/backup.js?v=1.11.0"></script>
+<script src="js/app.js?v=1.11.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(()=>{});
